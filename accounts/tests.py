@@ -2,10 +2,14 @@ from datetime import datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from google.auth.exceptions import RefreshError
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage
+from langchain_core.tools import tool
 
+import actions
 import agent
 import labels
 import run_context
@@ -477,3 +481,78 @@ class CleanupRunnerTests(TestCase):
         self.client.post(reverse("cleanup_now"))
         user.refresh_from_db()
         self.assertIsNone(user.cleanup_requested_at)
+
+
+class FakeClaude(GenericFakeChatModel):
+    """A chat model that replays scripted messages and records how tools were bound."""
+
+    bound: list = []
+
+    def bind_tools(self, tools, **kwargs):
+        self.bound.append(kwargs)
+        return self
+
+
+def tool_call(name, args):
+    return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": f"call-{name}"}])
+
+
+EMAIL = agent.Email(id="m1", thread_id="t1", sender="Bob <bob@example.com>", to="a@example.com", cc="", subject="Hi", body="Hello")
+RESULT = SimpleNamespace(model_dump_json=lambda indent=None: "{}")
+
+
+class LangChainAgentTests(SimpleTestCase):
+    def test_tools_are_the_four_actions_with_argument_descriptions(self):
+        self.assertEqual(
+            [t.name for t in actions.TOOLS],
+            ["apply_label", "add_to_digest", "block_time", "find_free_slots"],
+        )
+        for t in actions.TOOLS:
+            for name, schema in t.args.items():
+                self.assertTrue(schema.get("description"), f"{t.name}.{name} has no description")
+
+    def test_act_runs_a_tool_in_the_users_context_one_at_a_time(self):
+        seen = []
+
+        def add_to_digest(summary: str) -> str:
+            """Add the email to the digest."""
+            seen.append((summary, run_context.current()))
+            return "added to digest"
+
+        fake = FakeClaude(messages=iter([tool_call("add_to_digest", {"summary": "Bob says hi"}), AIMessage(content="Added to the digest.")]), bound=[])
+        ctx = run_context.RunContext(None)
+        with mock.patch.object(agent, "act_model", lambda: fake), mock.patch.object(
+            actions, "TOOLS", [tool(add_to_digest)]
+        ), run_context.use(ctx), mock.patch("builtins.print") as printed:
+            agent.act(EMAIL, RESULT, [])
+        self.assertEqual(seen, [("Bob says hi", ctx)])
+        self.assertTrue(fake.bound and all(kwargs["parallel_tool_calls"] is False for kwargs in fake.bound))
+        printed.assert_called_with("[agent]", "Added to the digest.")
+
+    def test_act_stops_after_max_steps(self):
+        calls = []
+
+        def add_to_digest(summary: str) -> str:
+            """Add the email to the digest."""
+            calls.append(summary)
+            return "added to digest"
+
+        endless = (tool_call("add_to_digest", {"summary": str(n)}) for n in range(100))
+        fake = FakeClaude(messages=endless, bound=[])
+        with mock.patch.object(agent, "act_model", lambda: fake), mock.patch.object(
+            actions, "TOOLS", [tool(add_to_digest)]
+        ), run_context.use(run_context.RunContext(None)), mock.patch("builtins.print"):
+            agent.act(EMAIL, RESULT, [])
+        self.assertEqual(len(calls), agent.MAX_STEPS)
+
+    def test_ask_returns_the_parsed_result_and_raises_on_refusal(self):
+        answer = {"raw": AIMessage(content="", response_metadata={"stop_reason": "end_turn"}), "parsed": "parsed", "parsing_error": None}
+        with mock.patch.object(agent, "ChatAnthropic") as chat:
+            structured = chat.return_value.with_structured_output.return_value
+            structured.invoke.return_value = answer
+            self.assertEqual(agent.ask("system", "user", agent.Reply, max_tokens=10), "parsed")
+            chat.return_value.with_structured_output.assert_called_once_with(agent.Reply, method="json_schema", include_raw=True)
+
+            answer["raw"] = AIMessage(content="", response_metadata={"stop_reason": "refusal"})
+            with self.assertRaisesMessage(RuntimeError, "Model refused"):
+                agent.ask("system", "user", agent.Reply, max_tokens=10)
