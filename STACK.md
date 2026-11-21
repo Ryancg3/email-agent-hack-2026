@@ -15,7 +15,7 @@ An email-triage agent with a small web app around it. It reads Gmail, classifies
 | Integrations | Gmail API, Google Calendar API, Google OAuth |
 | Background work | Custom `run_scheduler` management command |
 | Tests | Django `TestCase` + `unittest.mock` |
-| Deployment | Local, or Docker on Fly.io (gunicorn + scheduler, SQLite on a volume) |
+| Deployment | Local, or Docker on Render (gunicorn + scheduler, SQLite on a persistent disk) |
 
 Versions are the ones installed in `.venv`. `requirements.txt` doesn't pin any.
 
@@ -90,6 +90,6 @@ Versions are the ones installed in `.venv`. `requirements.txt` doesn't pin any.
 ## Deployment
 
 - Locally with `make dev`. `DEBUG` defaults to on and `ALLOWED_HOSTS` is limited to localhost.
-- Hosted on Fly.io with `Dockerfile`, `fly.toml` and `deploy/start.sh`: one always-on machine runs gunicorn and `run_scheduler`, with SQLite on a volume at `/data`. Static files are served by WhiteNoise. Guide: `docs/deploy-fly.md`.
-- `APP_HOST` (default `<app>.fly.dev` on Fly) adds the public host to `ALLOWED_HOSTS` and CSRF origins and trusts the proxy's HTTPS header. `SIGNUP_CLOSED=1` blocks new sign-ups.
+- Hosted on Render with `Dockerfile`, `render.yaml` and `deploy/start.sh`: one always-on web service runs gunicorn and `run_scheduler`, with SQLite on a disk at `/data`. Static files are served by WhiteNoise. `/health` is answered before the host check so platform probes pass. Guide: `docs/deploy-render.md`.
+- `APP_HOST` (on Render, defaults to `RENDER_EXTERNAL_HOSTNAME`) adds the public host to `ALLOWED_HOSTS` and CSRF origins and trusts the proxy's HTTPS header. `SIGNUP_CLOSED=1` blocks new sign-ups.
 - No CI.

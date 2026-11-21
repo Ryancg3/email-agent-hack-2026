@@ -51,5 +51,5 @@ Run `make help` to see every command.
 
 ## Hosting
 
-To keep the agent running when your laptop is off, deploy it to Fly.io for about
-$3 to $4 a month. See [docs/deploy-fly.md](docs/deploy-fly.md).
+To keep the agent running when your laptop is off, deploy it to Render for about
+$7.25 a month. See [docs/deploy-render.md](docs/deploy-render.md).

@@ -6,11 +6,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 TUNNEL_HOST = "jul-implemented-webster-examination.trycloudflare.com"
-# Public hostname when deployed (e.g. my-email-agent.fly.dev); unset for local dev.
-# On Fly.io it defaults to <app>.fly.dev.
-APP_HOST = os.environ.get("APP_HOST") or (
-    f"{os.environ['FLY_APP_NAME']}.fly.dev" if os.environ.get("FLY_APP_NAME") else ""
-)
+# Public hostname when deployed (e.g. email-agent.onrender.com); unset for local dev.
+# On Render it defaults to the service's onrender.com hostname.
+APP_HOST = os.environ.get("APP_HOST") or os.environ.get("RENDER_EXTERNAL_HOSTNAME", "")
 PUBLIC_HOSTS = [h for h in (TUNNEL_HOST, APP_HOST) if h]
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", *PUBLIC_HOSTS]
 CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in PUBLIC_HOSTS]
@@ -33,6 +31,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # First, so the host's health checks get an answer whatever Host header they send.
+    "accounts.middleware.HealthCheckMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",

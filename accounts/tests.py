@@ -30,6 +30,11 @@ class AccountViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
 
+    def test_health_answers_any_host(self):
+        response = self.client.get("/health", HTTP_HOST="10.0.0.5:10000")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get("/", HTTP_HOST="10.0.0.5:10000").status_code, 400)
+
     def test_landing_page_adapts_to_login_state(self):
         self.assertContains(self.client.get(reverse("home")), reverse("signup"))
         self.client.force_login(User.objects.create_user("a@example.com", "a-long-password"))
