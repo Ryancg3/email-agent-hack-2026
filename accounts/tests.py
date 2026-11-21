@@ -2,7 +2,7 @@ from datetime import datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from google.auth.exceptions import RefreshError
 
@@ -56,6 +56,19 @@ class AccountViewsTests(TestCase):
         data = {"email": "new@example.com", "password1": "a-long-password", "password2": "a-long-password"}
         response = self.client.post(reverse("signup"), data)
         self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(email="new@example.com").exists())
+
+    @override_settings(SIGNUP_CLOSED=True)
+    def test_signup_closed_creates_no_account(self):
+        data = {
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "email": "new@example.com",
+            "password1": "a-long-password",
+            "password2": "a-long-password",
+        }
+        response = self.client.post(reverse("signup"), data)
+        self.assertRedirects(response, reverse("login"))
         self.assertFalse(User.objects.filter(email="new@example.com").exists())
 
     def test_login_is_case_insensitive(self):

@@ -5,3 +5,5 @@ google-auth-oauthlib
 django
 cryptography
 requests
+gunicorn
+whitenoise

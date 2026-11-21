@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
@@ -34,6 +35,9 @@ def home(request):
 def signup(request):
     if request.user.is_authenticated:
         return redirect("dashboard")
+    if settings.SIGNUP_CLOSED:
+        messages.error(request, "Sign-up is closed on this server.")
+        return redirect("login")
     form = SignupForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         user = form.save()

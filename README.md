@@ -48,3 +48,8 @@ make test       # run the tests
 ```
 
 Run `make help` to see every command.
+
+## Hosting
+
+To keep the agent running when your laptop is off, deploy it to Fly.io for about
+$3 to $4 a month. See [docs/deploy-fly.md](docs/deploy-fly.md).

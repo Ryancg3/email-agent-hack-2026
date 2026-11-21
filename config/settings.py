@@ -6,8 +6,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 TUNNEL_HOST = "jul-implemented-webster-examination.trycloudflare.com"
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", TUNNEL_HOST]
-CSRF_TRUSTED_ORIGINS = [f"https://{TUNNEL_HOST}"]
+# Public hostname when deployed (e.g. my-email-agent.fly.dev); unset for local dev.
+# On Fly.io it defaults to <app>.fly.dev.
+APP_HOST = os.environ.get("APP_HOST") or (
+    f"{os.environ['FLY_APP_NAME']}.fly.dev" if os.environ.get("FLY_APP_NAME") else ""
+)
+PUBLIC_HOSTS = [h for h in (TUNNEL_HOST, APP_HOST) if h]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", *PUBLIC_HOSTS]
+CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in PUBLIC_HOSTS]
+
+if APP_HOST:
+    # Behind the host's HTTPS proxy: trust its scheme header, so the Google
+    # redirect URI is built as https://, and only send cookies over HTTPS.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -21,6 +34,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -46,11 +60,12 @@ TEMPLATES = [
     },
 ]
 
-# The web server and the scheduler process share this file.
+# The web server and the scheduler process share this file. When deployed it
+# lives on a persistent volume (DATABASE_PATH=/data/app.db).
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "app.db",
+        "NAME": os.environ.get("DATABASE_PATH", BASE_DIR / "app.db"),
         "OPTIONS": {
             "init_command": "PRAGMA journal_mode=WAL;",
             "transaction_mode": "IMMEDIATE",
@@ -67,6 +82,9 @@ AUTH_PASSWORD_VALIDATORS = [
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "home"
+# Set SIGNUP_CLOSED=1 on a public server once your own account exists, so
+# strangers can't sign up and run the agent on your Anthropic key.
+SIGNUP_CLOSED = os.environ.get("SIGNUP_CLOSED", "0") == "1"
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
@@ -74,6 +92,7 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Google "Web application" OAuth client, and the key that encrypts stored refresh tokens.
