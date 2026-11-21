@@ -1,9 +1,13 @@
+import base64
+import json
 from datetime import datetime, time, timedelta, timezone
+from io import StringIO
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone as django_timezone
 from google.auth.exceptions import RefreshError
 
 import agent
@@ -11,7 +15,8 @@ import labels
 import run_context
 import sublabel_cleanup
 
-from . import cleanup_runner, google_connect, runner
+from . import cleanup_runner, google_connect, push, runner
+from .management.commands import run_scheduler
 from .forms import LABELS_MAX
 from .models import GoogleConnection, Label, ProcessedEmail, SublabelReview, User
 
@@ -477,3 +482,141 @@ class CleanupRunnerTests(TestCase):
         self.client.post(reverse("cleanup_now"))
         user.refresh_from_db()
         self.assertIsNone(user.cleanup_requested_at)
+
+
+PUSH_SETTINGS = {"GMAIL_PUBSUB_TOPIC": "projects/p/topics/gmail", "GMAIL_PUSH_TOKEN": "secret"}
+
+
+def push_body(address):
+    data = base64.b64encode(json.dumps({"emailAddress": address, "historyId": "123"}).encode()).decode()
+    return json.dumps({"message": {"data": data, "messageId": "1"}, "subscription": "projects/p/subscriptions/s"})
+
+
+@override_settings(**PUSH_SETTINGS)
+class GmailPushWebhookTests(TestCase):
+    def setUp(self):
+        self.user = make_connected_user("ada@example.com")
+
+    def post(self, body, token="secret"):
+        return self.client.post(f"/gmail/push/?token={token}", body, content_type="application/json")
+
+    def test_marks_the_connection_of_the_notified_address(self):
+        self.assertEqual(self.post(push_body("Ada@Example.com")).status_code, 204)
+        self.user.google.refresh_from_db()
+        self.assertIsNotNone(self.user.google.push_received_at)
+
+    def test_rejects_a_wrong_token(self):
+        self.assertEqual(self.post(push_body("ada@example.com"), token="nope").status_code, 403)
+        self.user.google.refresh_from_db()
+        self.assertIsNone(self.user.google.push_received_at)
+
+    def test_acknowledges_malformed_and_unknown_notifications(self):
+        self.assertEqual(self.post("not json").status_code, 204)
+        self.assertEqual(self.post(json.dumps({"message": {"data": "!!"}})).status_code, 204)
+        self.assertEqual(self.post(push_body("someone@else.com")).status_code, 204)
+        self.user.google.refresh_from_db()
+        self.assertIsNone(self.user.google.push_received_at)
+
+    def test_off_without_settings(self):
+        with self.settings(GMAIL_PUBSUB_TOPIC="", GMAIL_PUSH_TOKEN=""):
+            self.assertEqual(self.post(push_body("ada@example.com"), token="").status_code, 404)
+
+    def test_dashboard_says_how_new_emails_are_handled(self):
+        self.client.force_login(self.user)
+        self.assertContains(self.client.get(reverse("dashboard")), "Checked every 5 minutes")
+        GoogleConnection.objects.update(watch_expires_at=django_timezone.now() + timedelta(days=7))
+        self.assertContains(self.client.get(reverse("dashboard")), "Handled within seconds")
+
+
+@override_settings(**PUSH_SETTINGS)
+class GmailPushSchedulerTests(TestCase):
+    def setUp(self):
+        self.user = make_connected_user()
+        self.ran = []
+        patcher = mock.patch.object(
+            run_scheduler.runner, "run_user", lambda user, rerun_newest=0: self.ran.append((user.email, rerun_newest))
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_agents(self, poll):
+        self.ran.clear()
+        run_scheduler.Command(stdout=StringIO()).run_agents(poll)
+        return self.ran
+
+    def watching(self, last_run_ago=timedelta(minutes=1)):
+        GoogleConnection.objects.update(
+            watch_expires_at=django_timezone.now() + timedelta(days=7), last_run_at=django_timezone.now() - last_run_ago
+        )
+
+    def test_push_runs_the_user_once(self):
+        self.watching()
+        GoogleConnection.objects.update(push_received_at=django_timezone.now())
+        self.assertEqual(self.run_agents(poll=False), [("a@example.com", 0)])
+        self.assertEqual(self.run_agents(poll=False), [])
+
+    def test_watched_users_are_polled_only_as_a_fallback(self):
+        self.watching()
+        self.assertEqual(self.run_agents(poll=True), [])
+        self.watching(last_run_ago=push.FALLBACK_POLL)
+        self.assertEqual(self.run_agents(poll=True), [("a@example.com", 0)])
+
+    def test_unwatched_users_are_polled_every_time(self):
+        GoogleConnection.objects.update(last_run_at=django_timezone.now())
+        self.assertEqual(self.run_agents(poll=True), [("a@example.com", 0)])
+        with self.settings(GMAIL_PUBSUB_TOPIC="", GMAIL_PUSH_TOKEN=""):
+            self.watching()
+            self.assertEqual(self.run_agents(poll=True), [("a@example.com", 0)])
+
+    def test_push_is_ignored_while_the_agent_is_off(self):
+        User.objects.update(agent_enabled=False)
+        GoogleConnection.objects.update(push_received_at=django_timezone.now())
+        self.assertEqual(self.run_agents(poll=True), [])
+
+class RunnerKeepsPushTests(TestCase):
+    def test_a_run_does_not_clear_a_push_that_arrives_during_it(self):
+        user = make_connected_user()
+        with mock.patch.object(runner, "_process_emails", lambda *a: push.mark_pushed("a@example.com")), \
+                mock.patch.object(runner.google_connect, "credentials", return_value=None):
+            runner.run_user(User.objects.select_related("google").get(pk=user.pk))
+        self.assertIsNotNone(GoogleConnection.objects.get().push_received_at)
+
+
+
+@override_settings(**PUSH_SETTINGS)
+@mock.patch.object(runner.google_connect, "credentials", return_value=None)
+class GmailWatchRenewalTests(TestCase):
+    def setUp(self):
+        self.user = make_connected_user()
+
+    def test_starts_and_renews_daily(self, _):
+        expiration = datetime(2030, 1, 8, tzinfo=timezone.utc)
+        with mock.patch.object(push.gmail, "watch_inbox", return_value={
+            "historyId": "1", "expiration": str(int(expiration.timestamp() * 1000)),
+        }) as watch:
+            push.renew_watches()
+            push.renew_watches()  # not due again yet
+        watch.assert_called_once_with("projects/p/topics/gmail")
+        connection = GoogleConnection.objects.get()
+        self.assertEqual(connection.watch_expires_at, expiration)
+        self.assertAlmostEqual(connection.watch_renew_at - django_timezone.now(), push.RENEW_EVERY, delta=timedelta(minutes=1))
+
+    def test_failure_is_shown_and_retried_in_an_hour(self, _):
+        with mock.patch.object(push.gmail, "watch_inbox", side_effect=RuntimeError("topic not found")):
+            push.renew_watches()
+        connection = GoogleConnection.objects.get()
+        self.assertIn("topic not found", connection.watch_error)
+        self.assertAlmostEqual(connection.watch_renew_at - django_timezone.now(), push.RETRY_AFTER, delta=timedelta(minutes=1))
+
+    def test_nothing_without_settings(self, _):
+        with self.settings(GMAIL_PUBSUB_TOPIC=""), mock.patch.object(push.gmail, "watch_inbox") as watch:
+            push.renew_watches()
+        watch.assert_not_called()
+
+    def test_disconnect_stops_the_watch(self, _):
+        GoogleConnection.objects.update(watch_expires_at=django_timezone.now() + timedelta(days=7))
+        self.client.force_login(self.user)
+        with mock.patch.object(push.gmail, "stop_watch") as stop, mock.patch.object(google_connect, "revoke"):
+            self.client.post(reverse("google_disconnect"))
+        stop.assert_called_once()
+        self.assertFalse(GoogleConnection.objects.exists())

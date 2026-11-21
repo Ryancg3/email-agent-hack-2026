@@ -80,3 +80,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 TOKEN_KEY = os.environ["TOKEN_KEY"]
+
+# Gmail push notifications (docs/gmail-push.md). Both unset: the scheduler only polls.
+# The Pub/Sub topic Gmail posts to, as projects/<project-id>/topics/<topic>.
+GMAIL_PUBSUB_TOPIC = os.environ.get("GMAIL_PUBSUB_TOPIC", "")
+# Secret in the push subscription's URL, so only Pub/Sub can wake the agent.
+GMAIL_PUSH_TOKEN = os.environ.get("GMAIL_PUSH_TOKEN", "")
