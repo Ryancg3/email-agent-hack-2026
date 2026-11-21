@@ -22,13 +22,14 @@ class ReplySlotTests(SimpleTestCase):
     """The calendar is faked: busy periods as freebusy gives them (in UTC, like
     Google), and the email-time events the agent groups with."""
 
-    def place(self, now, meetings, minutes=15, urgent=False, email_time=()):
+    def place(self, now, meetings, minutes=15, urgent=False, email_time=(), after_hours=False):
         email_time = list(email_time)
         busy = sorted(
             (s.astimezone(ZoneInfo("UTC")), e.astimezone(ZoneInfo("UTC")))
             for s, e in [*meetings, *email_time]
         )
-        ctx = run_context.RunContext(creds=None, work_start=time(9), work_end=time(18))
+        ctx = run_context.RunContext(creds=None, work_start=time(9), work_end=time(18),
+                                     urgent_after_hours=after_hours)
         window = (now, datetime(2026, 11, 28, tzinfo=TZ))
         with run_context.use(ctx), \
                 mock.patch.object(gcal, "_timezone", return_value=TZ), \
@@ -81,3 +82,15 @@ class ReplySlotTests(SimpleTestCase):
         email_time = [(at(11), at(11, 30))]
         slot = self.place(at(11), [], urgent=True, email_time=email_time)
         self.assertEqual(slot, (at(11, 30), at(11, 45)))
+
+    def test_urgent_after_hours_waits_for_the_next_working_day_by_default(self):
+        slot = self.place(at(20), [], urgent=True)
+        self.assertEqual(slot[0], datetime(2026, 11, 24, 9, tzinfo=TZ))
+
+    def test_urgent_after_hours_setting_blocks_the_evening(self):
+        slot = self.place(at(20), [(at(19, 30), at(20, 30))], urgent=True, after_hours=True)
+        self.assertEqual(slot, (at(20, 35), at(20, 50)))
+
+    def test_after_hours_setting_leaves_normal_replies_in_working_hours(self):
+        slot = self.place(at(20), [], after_hours=True)
+        self.assertEqual(slot[0], datetime(2026, 11, 24, 9, tzinfo=TZ))

@@ -76,16 +76,21 @@ def _around_meetings(busy: list[Slot], email_blocks: list[Slot]) -> list[Slot]:
     ]
 
 
-def free_slots(days: int = 5, min_minutes: int = 30, email_blocks: list[Slot] | None = None) -> list[Slot]:
+def free_slots(
+    days: int = 5, min_minutes: int = 30, email_blocks: list[Slot] | None = None,
+    any_hour: bool = False,
+) -> list[Slot]:
     """Free slots of at least min_minutes within working hours, from now on.
 
     With email_blocks (the email time in the window), the slots keep clear of
     meetings: they start a few minutes after one ends and stop before the next
     one starts, so a reply block never lands right before a meeting. Back-to-back
     meetings leave no slot between them, so the block goes after the last one.
+
+    any_hour drops working hours: every day, around the clock.
     """
     ctx = run_context.current()
-    hours = (ctx.work_start, ctx.work_end)
+    hours = (time.min, time.max) if any_hour else (ctx.work_start, ctx.work_end)
     tz = _timezone()
     now, end = _window(days)
     today = now.date()
@@ -96,7 +101,7 @@ def free_slots(days: int = 5, min_minutes: int = 30, email_blocks: list[Slot] | 
     slots = []
     for offset in range(days):
         day = today + timedelta(days=offset)
-        if day.weekday() in WORKDAYS:
+        if any_hour or day.weekday() in WORKDAYS:
             slots += _gaps(day, hours, tz, now, busy, timedelta(minutes=min_minutes))
     return slots
 
@@ -162,13 +167,15 @@ def reply_slot(minutes: int, days: int = 5, urgent: bool = False) -> tuple[Slot,
 
     Urgent replies take the first free time, which is within the hour unless
     meetings or the end of the working day are in the way; then it is the first
-    free time after them. Other replies go next to existing email time when
+    free time after them. With the user's urgent_after_hours setting, urgent
+    replies ignore working hours. Other replies go next to existing email time when
     that is free within MAX_GROUP_DELAY, else the first free time.
 
     Returns the slot and the email-time event it is next to (or None), or
     None if there is no free slot."""
     anchors = _email_blocks(*_window(days))
-    slots = free_slots(days, minutes, email_blocks=anchors)
+    any_hour = urgent and run_context.current().urgent_after_hours
+    slots = free_slots(days, minutes, email_blocks=anchors, any_hour=any_hour)
     return _pick_slot(slots, [] if urgent else anchors, minutes)
 
 

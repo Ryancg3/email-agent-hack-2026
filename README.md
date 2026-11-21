@@ -22,6 +22,8 @@ as drafts, never sent.
    blocks the first free time, within the hour unless meetings are in the way.
    Reply blocks start 5 to 10 minutes after a meeting ends and never sit right
    before the next one, so after back-to-back meetings they come after the last one.
+   Reply time stays within working hours, unless the user turns on "Super-urgent
+   emails after hours" in Settings, which lets `instant` blocks go in the evening and at weekends.
 4. **Draft reply** (Claude). Runs only when a reply is needed. Follows
    [skills/write-reply/SKILL.md](skills/write-reply/SKILL.md) and saves a Gmail draft.
 5. **Extra actions** (Claude). A tool loop of at most 5 steps that can call the

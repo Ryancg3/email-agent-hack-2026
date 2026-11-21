@@ -31,6 +31,8 @@ class User(AbstractUser):
     agent_enabled = models.BooleanField(default=True)
     work_start = models.TimeField(default=time(9, 0))
     work_end = models.TimeField(default=time(18, 0))
+    # On: super-urgent ("instant") emails get reply time even outside working hours.
+    urgent_after_hours = models.BooleanField(default=False)
     run_requested_at = models.DateTimeField(null=True, blank=True)
     # Off: sub-label cleanup only reports what it would delete.
     cleanup_enabled = models.BooleanField(default=False)

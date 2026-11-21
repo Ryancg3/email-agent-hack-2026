@@ -26,6 +26,7 @@ def context(user: User) -> run_context.RunContext:
         # Accounts made before signup asked for names have none: fall back to the email's local part.
         first_name=user.first_name or user.email.split("@")[0],
         last_name=user.last_name,
+        urgent_after_hours=user.urgent_after_hours,
         labels={labels.key(label.name): label.entry() for label in user_labels(user)},
     )
 
