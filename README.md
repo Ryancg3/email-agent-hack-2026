@@ -18,8 +18,10 @@ as drafts, never sent.
    needed to reply, whether a reply is needed, and a one-sentence summary.
 3. **Required actions** (code). Applies the labels, then runs the action for the
    urgency: `for_summary` adds the email to the digest, `schedule_time` blocks
-   calendar time, and `instant` does the same as `schedule_time` for now (instant
-   notifications aren't built yet).
+   calendar time next to other email time (usually within a day), and `instant`
+   blocks the first free time, within the hour unless meetings are in the way.
+   Reply blocks start 5 to 10 minutes after a meeting ends and never sit right
+   before the next one, so after back-to-back meetings they come after the last one.
 4. **Draft reply** (Claude). Runs only when a reply is needed. Follows
    [skills/write-reply/SKILL.md](skills/write-reply/SKILL.md) and saves a Gmail draft.
 5. **Extra actions** (Claude). A tool loop of at most 5 steps that can call the
