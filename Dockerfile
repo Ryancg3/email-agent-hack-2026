@@ -1,6 +1,7 @@
 FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1 \
+    DJANGO_DEBUG=0 \
     PYTHONDONTWRITEBYTECODE=1 \
     DATABASE_PATH=/data/app.db \
     PORT=8000
@@ -14,4 +15,4 @@ COPY . .
 RUN DJANGO_SECRET_KEY=build TOKEN_KEY=build python manage.py collectstatic --noinput
 
 EXPOSE 8000
-CMD ["deploy/start.sh"]
+CMD ["bash", "deploy/start.sh"]

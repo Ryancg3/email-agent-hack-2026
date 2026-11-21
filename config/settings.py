@@ -7,8 +7,12 @@ SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 TUNNEL_HOST = "jul-implemented-webster-examination.trycloudflare.com"
 # Public hostname when deployed (e.g. email-agent.onrender.com); unset for local dev.
-# On Render it defaults to the service's onrender.com hostname.
-APP_HOST = os.environ.get("APP_HOST") or os.environ.get("RENDER_EXTERNAL_HOSTNAME", "")
+# On Render and Railway it defaults to the hostname the platform assigns.
+APP_HOST = (
+    os.environ.get("APP_HOST")
+    or os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+    or os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+)
 PUBLIC_HOSTS = [h for h in (TUNNEL_HOST, APP_HOST) if h]
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", *PUBLIC_HOSTS]
 CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in PUBLIC_HOSTS]
