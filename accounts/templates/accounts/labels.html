@@ -115,26 +115,38 @@
       if (refocus && pickerFor) pickerFor.parentNode.querySelector("[data-icon-picker]").focus();
       pickerFor = null;
     }
+    // Load the picker once, however many times Choose is clicked while it loads.
+    var loading = null;
+    function loadPicker() {
+      if (!loading) {
+        loading = import("{% static 'accounts/vendor/emoji-picker-element/index.js' %}").then(function () {
+          picker = document.createElement("emoji-picker");
+          picker.dataSource = "{% static 'accounts/vendor/emoji-picker-element/data.json' %}";
+          picker.addEventListener("emoji-click", function (e) {
+            pickerFor.value = e.detail.unicode;
+            pickerFor.dispatchEvent(new Event("input", { bubbles: true }));
+            closePicker(true);
+          });
+          popover.appendChild(picker);
+        }, function (error) {
+          loading = null;  // let the next click try again
+          throw error;
+        });
+      }
+      return loading;
+    }
     function openPicker(button) {
-      pickerFor = button.parentNode.querySelector("input");
+      var input = button.parentNode.querySelector("input");
+      pickerFor = input;
       button.parentNode.appendChild(popover);
       popover.hidden = false;
-      if (picker) {
+      loadPicker().then(function () {
+        // Closed, or opened for another label, while loading: leave it as it is now.
+        if (popover.hidden || pickerFor !== input) return;
         picker.className = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-        picker.shadowRoot.querySelector("input").focus();
-        return;
-      }
-      import("{% static 'accounts/vendor/emoji-picker-element/index.js' %}").then(function () {
-        picker = document.createElement("emoji-picker");
-        picker.dataSource = "{% static 'accounts/vendor/emoji-picker-element/data.json' %}";
-        picker.addEventListener("emoji-click", function (e) {
-          pickerFor.value = e.detail.unicode;
-          pickerFor.dispatchEvent(new Event("input", { bubbles: true }));
-          closePicker(true);
-        });
-        popover.appendChild(picker);
-        openPicker(button);
-      });
+        var search = picker.shadowRoot && picker.shadowRoot.querySelector("input");
+        if (search) search.focus();
+      }, function () { closePicker(false); });
     }
     list.addEventListener("click", function (e) {
       var button = e.target.closest("[data-icon-picker]");
