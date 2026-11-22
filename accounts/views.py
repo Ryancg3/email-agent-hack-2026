@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
@@ -17,7 +19,7 @@ import run_context
 
 from . import cleanup_runner, google_connect, push, runner
 from .forms import LabelFormSet, SettingsForm, SignupForm
-from .models import GoogleConnection, Label, seed_labels, user_labels
+from .models import GoogleConnection, Label, ProcessedEmail, seed_labels, user_labels
 
 
 def health(request):
@@ -67,10 +69,14 @@ def dashboard(request):
 
 def _render_dashboard(request, form):
     connection = GoogleConnection.objects.filter(user=request.user).first()
+    failed = request.user.processed_emails.filter(
+        status=ProcessedEmail.Status.ERROR, processed_at__gte=timezone.now() - timedelta(hours=24)
+    )
     return render(request, "accounts/dashboard.html", {
         "connection": connection,
         "form": form,
-        "activity": request.user.processed_emails.all()[:20],
+        "failed_count": failed.count(),
+        "latest_failure": failed.first(),
         "cleanup": cleanup_runner.last_result(request.user) if connection else None,
         "push_on": bool(
             push.enabled() and connection and connection.watch_expires_at
