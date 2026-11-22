@@ -111,6 +111,17 @@ def list_inbox_ids(limit: int, after: datetime | None = None) -> list[str]:
     return [ref["id"] for ref in refs.get("messages", [])]
 
 
+def watch_inbox(topic: str) -> dict:
+    """Ask Gmail to post to a Pub/Sub topic when the inbox changes. Lasts 7 days;
+    call again to renew. Returns {historyId, expiration (ms since epoch)}."""
+    body = {"topicName": topic, "labelIds": ["INBOX"], "labelFilterBehavior": "INCLUDE"}
+    return _service().users().watch(userId="me", body=body).execute(num_retries=RETRIES)
+
+
+def stop_watch() -> None:
+    _service().users().stop(userId="me").execute(num_retries=RETRIES)
+
+
 def get_email(message_id: str) -> dict:
     """One message as {id, thread_id, sender, to, cc, subject, body}."""
     msg = _service().users().messages().get(
