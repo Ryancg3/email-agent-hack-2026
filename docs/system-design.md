@@ -108,17 +108,14 @@ user's label descriptions on the Labels page (new users start from
 [labels.md](../labels.md)).
 
 `instant` is for the rare super-urgent email: a same-day deadline, a problem happening
-now, or someone blocked until the user answers. Event reminders and one-time or
-sign-in codes are always `not_urgent`; security alerts are judged as usual. How the reply block is placed is shown
+now, or someone blocked until the user answers. How the reply block is placed is shown
 in [Placing a reply block](#placing-a-reply-block).
 
 ### Placing a reply block
 
 ```mermaid
 flowchart TD
-    START["block_time(minutes, urgent)"] --> AGE{"Email more than<br/>5 days old?"}
-    AGE -- "yes" --> DONE0["Don't block: too old<br/>(reruns over old mail)"]
-    AGE -- "no" --> EXIST{"Event for this email<br/>already in the calendar?"}
+    START["block_time(minutes, urgent)"] --> EXIST{"Event for this email<br/>already in the calendar?"}
     EXIST -- "yes, still there" --> DONE1["Keep it: already blocked"]
     EXIST -- "yes, user deleted it" --> DONE2["Don't block again"]
     EXIST -- "no" --> CAL["Read the next 5 days of the calendar<br/>ignore events marked free or declined,<br/>count busy all-day events (vacation)"]
@@ -142,8 +139,6 @@ flowchart TD
 work in batches; urgent replies skip the grouping and take the first free time. If
 nothing fits in the next 5 days, the block is skipped and a line is printed to the
 scheduler log. The email is still saved as `ok`, so the dashboard doesn't show it.
-Emails more than 5 days old (`MAX_BLOCK_AGE` in `actions.py`) are never blocked, so
-rerunning the agent over old mail (`make agent N=200`) only labels it.
 
 Typical time per email: 10 to 30 seconds of Claude work (two or three calls, plus
 the tool loop).

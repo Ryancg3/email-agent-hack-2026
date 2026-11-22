@@ -5,7 +5,6 @@ minimum, and Claude can call the ones in ALL as tools for anything beyond that.
 apply_label, draft_reply and block_time change the real Gmail inbox and calendar.
 """
 
-from datetime import datetime, timedelta, timezone
 from email.utils import getaddresses
 
 from langchain_core.tools import tool
@@ -17,10 +16,6 @@ import labels
 
 # Most of the user's labels one email can hold, sub-labels included.
 MAX_LABELS = 3
-
-# Emails older than this never get a calendar block, so rerunning the agent over
-# old mail (make agent N=200, or a rerun from the dashboard) only labels it.
-MAX_BLOCK_AGE = timedelta(days=5)
 
 
 def apply_label(message_id: str, label_name: str, sublabel: str | None = None) -> str:
@@ -82,7 +77,6 @@ def block_time(message_id: str, title: str, minutes: int, notes: str, urgent: bo
     starts 5 to 10 minutes after a meeting, never right before one. Not urgent:
     right next to existing email time when possible, else the next free slot.
     Urgent: the first free time, within the hour unless meetings are in the way.
-    Emails more than 5 days old are never blocked.
 
     Args:
         message_id: Gmail id of the email the time is for; the event links to it.
@@ -92,10 +86,6 @@ def block_time(message_id: str, title: str, minutes: int, notes: str, urgent: bo
             deadline, and what to prepare.
         urgent: True if the email needs an answer within the hour.
     """
-    age = datetime.now(timezone.utc) - gmail.received_at(message_id)
-    if age > MAX_BLOCK_AGE:
-        print(f"[action] not blocked, email is {age.days} days old: {title}")
-        return f"not blocked: the email is {age.days} days old, older than {MAX_BLOCK_AGE.days} days"
     if existing := gcal.find_event_for_message(message_id):
         if existing["status"] == "cancelled":
             return "not blocked: the user deleted the earlier block for this email"

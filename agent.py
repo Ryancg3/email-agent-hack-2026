@@ -38,10 +38,6 @@ urgency (one value)
 - not_urgent: no prompt attention needed, including emails worth knowing about that can wait
 - schedule_time: needs a reply that takes some time to prepare, and can wait for the next block of email time, usually within a day
 - instant: super urgent, needs an answer within the hour; rare, for example a same-day deadline, a problem that is happening now, or a person blocked until the user answers
-Always not_urgent, even when they sound time-sensitive:
-- event reminders, such as "your event starts in 1 hour" from Luma or a calendar app: the user already knows about the event and nothing needs an answer
-- one-time codes and sign-in codes: the user uses them the moment they arrive, so they never need time set aside
-Security alerts about the user's own accounts, such as a sign-in attempt or a password change, are not covered by this rule: judge them as usual.
 
 minutes_needed (integer)
 How many minutes the user needs to respond to the email, for example to find a meeting time and reply. Count only the response, not any work the email asks for.
