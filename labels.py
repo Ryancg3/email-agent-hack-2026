@@ -1,7 +1,7 @@
 """Descriptions and sub-label rules for each Gmail label.
 
 Web runs use the labels the user edits on the Labels tab; the CLI reads labels.md,
-which is also where new users' labels come from.
+which is also where new users' labels come from (a generic starter set).
 """
 
 from pathlib import Path
