@@ -91,6 +91,7 @@ def block_time(message_id: str, title: str, minutes: int, notes: str, urgent: bo
             return "not blocked: the user deleted the earlier block for this email"
         return f"already blocked {gcal.format_slot(gcal.event_slot(existing))}"
     if not (picked := gcal.reply_slot(minutes, urgent=urgent)):
+        print(f"[action] not blocked, no free slot in the next days: {title}")
         return "error: no free slot in the next days"
     slot, anchor = picked
     url = gmail.message_url(message_id)
