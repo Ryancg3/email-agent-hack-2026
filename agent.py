@@ -36,8 +36,8 @@ Pick 0 to 3 labels from the allowed labels, best fit first. Each label's descrip
 
 urgency (one value)
 - not_urgent: no prompt attention needed, including emails worth knowing about that can wait
-- schedule_time: urgent, needs a prompt reply that takes some time to prepare
-- instant: needs attention right now
+- schedule_time: needs a reply that takes some time to prepare, and can wait for the next block of email time, usually within a day
+- instant: super urgent, needs an answer within the hour; rare, for example a same-day deadline, a problem that is happening now, or a person blocked until the user answers
 
 minutes_needed (integer)
 How many minutes the user needs to respond to the email, for example to find a meeting time and reply. Count only the response, not any work the email asks for.
@@ -156,22 +156,23 @@ def block_notes(email: Email, result) -> str:
 
 # The minimum that always happens, run by code (not Claude): labelling, then the
 # actions for the urgency. Each entry: (action, how to build its arguments from the email and result).
+def reply_block(urgent: bool):
+    return lambda email, r: {
+        "message_id": email.id,
+        "title": f"Reply to {sender_name(email)}: {email.subject}",
+        "minutes": r.minutes_needed,
+        "notes": block_notes(email, r),
+        "urgent": urgent,
+    }
+
+
 REQUIRED = {
     "not_urgent": [],
-    "schedule_time": [
-        (
-            actions.block_time,
-            lambda email, r: {
-                "message_id": email.id,
-                "title": f"Reply to {sender_name(email)}: {email.subject}",
-                "minutes": r.minutes_needed,
-                "notes": block_notes(email, r),
-            },
-        )
-    ],
+    # Grouped with other email time, usually within a day.
+    "schedule_time": [(actions.block_time, reply_block(urgent=False))],
+    # Not grouped: the first free time, so right after the meeting the user is in.
+    "instant": [(actions.block_time, reply_block(urgent=True))],
 }
-# Placeholder until there's a way to alert the user right away: instant blocks time like schedule_time.
-REQUIRED["instant"] = REQUIRED["schedule_time"]
 
 MAX_STEPS = 5
 

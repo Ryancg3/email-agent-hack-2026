@@ -137,6 +137,10 @@
               <div class="field"><label for="{{ form.work_end.id_for_label }}">Work ends</label>{{ form.work_end }}</div>
             </div>
             <p class="muted small">Reply time is blocked Monday to Friday within these hours.</p>
+            <label class="switch">
+              {{ form.urgent_after_hours }}
+              <div><strong>Super-urgent emails after hours</strong><span>Blocks reply time for super-urgent emails within the hour, even in the evening or at the weekend.</span></div>
+            </label>
             <button type="submit" class="btn btn-secondary btn-block">Save settings</button>
           </form>
         </div>

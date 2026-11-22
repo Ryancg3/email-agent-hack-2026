@@ -19,6 +19,8 @@ class RunContext:
     creds: Credentials
     work_start: time = time(9, 0)
     work_end: time = time(18, 0)
+    # Super-urgent emails get reply time outside working hours too.
+    urgent_after_hours: bool = False
     # The CLI has no signup, so it keeps these placeholders; web runs use the names from signup.
     first_name: str = "Jane"
     last_name: str = "Doe"

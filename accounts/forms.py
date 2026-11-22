@@ -29,12 +29,13 @@ class SignupForm(BaseUserCreationForm):
 class SettingsForm(forms.ModelForm):
     class Meta:
         model = User
-        fields = ("agent_enabled", "cleanup_enabled", "work_start", "work_end")
+        fields = ("agent_enabled", "cleanup_enabled", "work_start", "work_end", "urgent_after_hours")
         widgets = {
             "agent_enabled": forms.CheckboxInput(attrs={"role": "switch"}),
             "cleanup_enabled": forms.CheckboxInput(attrs={"role": "switch"}),
             "work_start": forms.TimeInput(attrs={"type": "time"}, format="%H:%M"),
             "work_end": forms.TimeInput(attrs={"type": "time"}, format="%H:%M"),
+            "urgent_after_hours": forms.CheckboxInput(attrs={"role": "switch"}),
         }
 
     def clean(self):

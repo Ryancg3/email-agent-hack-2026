@@ -72,9 +72,11 @@ def apply_label(message_id: str, label_name: str, sublabel: str | None = None) -
     return f"labelled {parent['name']} and {full_name}{new}"
 
 
-def block_time(message_id: str, title: str, minutes: int, notes: str) -> str:
-    """Block a free slot in the user's calendar to respond to an email, right
-    next to existing email time when possible, else the next free slot.
+def block_time(message_id: str, title: str, minutes: int, notes: str, urgent: bool = False) -> str:
+    """Block a free slot in the user's calendar to respond to an email. The block
+    starts 5 to 10 minutes after a meeting, never right before one. Not urgent:
+    right next to existing email time when possible, else the next free slot.
+    Urgent: the first free time, within the hour unless meetings are in the way.
 
     Args:
         message_id: Gmail id of the email the time is for; the event links to it.
@@ -82,12 +84,13 @@ def block_time(message_id: str, title: str, minutes: int, notes: str) -> str:
         minutes: Length of the block in minutes.
         notes: Event description: who the email is from, what it asks, any
             deadline, and what to prepare.
+        urgent: True if the email needs an answer within the hour.
     """
     if existing := gcal.find_event_for_message(message_id):
         if existing["status"] == "cancelled":
             return "not blocked: the user deleted the earlier block for this email"
         return f"already blocked {gcal.format_slot(gcal.event_slot(existing))}"
-    if not (picked := gcal.reply_slot(minutes)):
+    if not (picked := gcal.reply_slot(minutes, urgent=urgent)):
         return "error: no free slot in the next days"
     slot, anchor = picked
     url = gmail.message_url(message_id)

@@ -16,6 +16,10 @@ WORKDAYS = range(0, 5)  # Monday to Friday; working hours come from the run cont
 GROUP_KEYWORDS = ("reply", "replies", "email", "inbox")
 # Group with existing email time only if that delays the block by at most this much.
 MAX_GROUP_DELAY = timedelta(days=1)
+# Reply blocks start 5 to 10 minutes after a meeting ends (5 minutes, then rounded up
+# to the next 5-minute mark), and end at least this long before the next meeting.
+AFTER_MEETING = timedelta(minutes=5)
+BEFORE_MEETING = timedelta(minutes=10)
 
 Slot = tuple[datetime, datetime]
 
@@ -52,55 +56,118 @@ def _window(days: int) -> Slot:
     return now, datetime.combine(now.date() + timedelta(days=days), time.min, tz)
 
 
-def free_slots(days: int = 5, min_minutes: int = 30) -> list[Slot]:
-    """Free slots of at least min_minutes within working hours, from now on."""
-    ctx = run_context.current()
-    hours = (ctx.work_start, ctx.work_end)
+def _round_up_5(t: datetime) -> datetime:
+    t = t.replace(second=0, microsecond=0) + timedelta(minutes=1 if t.second or t.microsecond else 0)
+    return t + timedelta(minutes=-t.minute % 5)
+
+
+def _is_email_time(event: dict) -> bool:
+    """The agent's own reply blocks and the user's events with a GROUP_KEYWORDS
+    word in the title."""
+    return (
+        "gmailMessageId" in event.get("extendedProperties", {}).get("private", {})
+        or any(word in event.get("summary", "").lower() for word in GROUP_KEYWORDS)
+    )
+
+
+def _blocks_time(event: dict) -> bool:
+    """Whether the event makes the user busy: not marked free, not declined."""
+    return not (
+        event.get("transparency") == "transparent"
+        or any(a.get("self") and a.get("responseStatus") == "declined"
+               for a in event.get("attendees", []))
+    )
+
+
+def _events(start: datetime, end: datetime) -> list[dict]:
+    """Events in the range, all-day ones included."""
+    return _service().events().list(
+        calendarId="primary", timeMin=start.isoformat(), timeMax=end.isoformat(),
+        singleEvents=True, orderBy="startTime", maxResults=2500,
+    ).execute()["items"]
+
+
+def _any_slot(event: dict) -> Slot:
+    """An event's start and end; an all-day event runs from midnight to
+    midnight in the calendar's time zone."""
+    if "dateTime" in event["start"]:
+        return event_slot(event)
     tz = _timezone()
+    return tuple(datetime.combine(date.fromisoformat(event[edge]["date"]), time.min, tz)
+                 for edge in ("start", "end"))
+
+
+def _calendar(start: datetime, end: datetime) -> tuple[list[Slot], list[Slot]]:
+    """The meetings and the email time in the range, both only events that
+    make the user busy. Meetings include busy all-day events, like a vacation.
+    Starts a little earlier, so a meeting that just ended still keeps its
+    AFTER_MEETING buffer."""
+    events = [e for e in _events(start - AFTER_MEETING - timedelta(minutes=5), end) if _blocks_time(e)]
+    timed_email = [e for e in events if "dateTime" in e["start"] and _is_email_time(e)]
+    meetings = [_any_slot(e) for e in events if e not in timed_email]
+    return meetings, [event_slot(e) for e in timed_email]
+
+
+def _around_meetings(meetings: list[Slot], email_time: list[Slot]) -> list[Slot]:
+    """What a reply block must stay clear of: each meeting widened by
+    BEFORE_MEETING before it and AFTER_MEETING after it (rounded up to the next
+    5-minute mark), and email time as it is, so reply blocks can sit right next
+    to it. A meeting that overlaps email time keeps its buffers."""
+    padded = [(start - BEFORE_MEETING, _round_up_5(end + AFTER_MEETING)) for start, end in meetings]
+    return sorted(padded + email_time)
+
+
+def free_slots(days: int = 5, min_minutes: int = 30) -> list[Slot]:
+    """Free slots of at least min_minutes within working hours, from now on,
+    from the calendar's free/busy times (for proposing meeting times)."""
     now, end = _window(days)
-    today = now.date()
-    busy = _busy(now, end)
-
-    slots = []
-    for offset in range(days):
-        day = today + timedelta(days=offset)
-        if day.weekday() in WORKDAYS:
-            slots += _gaps(day, hours, tz, now, busy, timedelta(minutes=min_minutes))
-    return slots
+    return _working_gaps(days, _busy(now, end), timedelta(minutes=min_minutes))
 
 
-def _gaps(
-    day: date, hours: tuple[time, time], tz: ZoneInfo, now: datetime,
-    busy: list[Slot], min_length: timedelta,
-) -> list[Slot]:
-    cursor = max(datetime.combine(day, hours[0], tz), now)
-    day_end = datetime.combine(day, hours[1], tz)
+def reply_gaps(days: int, min_minutes: int, any_hour: bool = False) -> tuple[list[Slot], list[Slot]]:
+    """Free time for a reply block, and the email time in the window.
+
+    The gaps keep clear of meetings: they start 5 to 10 minutes after one ends
+    and stop before the next one starts, so a reply block never lands right
+    before a meeting. Back-to-back meetings leave no gap between them, so the
+    block goes after the last one.
+
+    Within working hours, or with any_hour around the clock, every day.
+    """
+    now, end = _window(days)
+    meetings, email_time = _calendar(now, end)
+    busy = _around_meetings(meetings, email_time)
+    min_length = timedelta(minutes=min_minutes)
+    if any_hour:
+        return _gaps(now, end, busy, min_length), email_time
+    return _working_gaps(days, busy, min_length), email_time
+
+
+def _working_gaps(days: int, busy: list[Slot], min_length: timedelta) -> list[Slot]:
+    ctx = run_context.current()
+    tz = _timezone()
+    now, _ = _window(days)
     gaps = []
-    for busy_start, busy_end in busy:
-        if busy_end <= cursor or busy_start >= day_end:
+    for offset in range(days):
+        day = now.date() + timedelta(days=offset)
+        if day.weekday() in WORKDAYS:
+            start = max(datetime.combine(day, ctx.work_start, tz), now)
+            gaps += _gaps(start, datetime.combine(day, ctx.work_end, tz), busy, min_length)
+    return gaps
+
+
+def _gaps(start: datetime, end: datetime, busy: list[Slot], min_length: timedelta) -> list[Slot]:
+    """The free stretches of at least min_length between start and end."""
+    cursor, gaps = start, []
+    for busy_start, busy_end in sorted(busy):
+        if busy_end <= cursor or busy_start >= end:
             continue
         if busy_start - cursor >= min_length:
             gaps.append((cursor, busy_start))
         cursor = max(cursor, busy_end)
-    if day_end - cursor >= min_length:
-        gaps.append((cursor, day_end))
+    if end - cursor >= min_length:
+        gaps.append((cursor, end))
     return gaps
-
-
-def _email_blocks(start: datetime, end: datetime) -> list[Slot]:
-    """Timed events in the range that are email time: the agent's own reply
-    blocks or the user's events with a GROUP_KEYWORDS word in the title."""
-    events = _service().events().list(
-        calendarId="primary", timeMin=start.isoformat(), timeMax=end.isoformat(),
-        singleEvents=True, orderBy="startTime",
-    ).execute()["items"]
-    return [
-        event_slot(e) for e in events
-        if "dateTime" in e["start"] and (
-            "gmailMessageId" in e.get("extendedProperties", {}).get("private", {})
-            or any(word in e.get("summary", "").lower() for word in GROUP_KEYWORDS)
-        )
-    ]
 
 
 def _pick_slot(slots: list[Slot], anchors: list[Slot], minutes: int) -> tuple[Slot, Slot | None] | None:
@@ -125,12 +192,20 @@ def _pick_slot(slots: list[Slot], anchors: list[Slot], minutes: int) -> tuple[Sl
     return (first, first + length), None
 
 
-def reply_slot(minutes: int, days: int = 5) -> tuple[Slot, Slot | None] | None:
-    """Where to block reply time: next to existing email time when possible.
+def reply_slot(minutes: int, days: int = 5, urgent: bool = False) -> tuple[Slot, Slot | None] | None:
+    """Where to block reply time, always clear of meetings (see reply_gaps).
+
+    Urgent replies take the first free time, which is within the hour unless
+    meetings or the end of the working day are in the way; then it is the first
+    free time after them. With the user's urgent_after_hours setting, urgent
+    replies ignore working hours. Other replies go next to existing email time when
+    that is free within MAX_GROUP_DELAY, else the first free time.
+
     Returns the slot and the email-time event it is next to (or None), or
     None if there is no free slot."""
-    slots = free_slots(days, minutes)
-    return _pick_slot(slots, _email_blocks(*_window(days)), minutes)
+    any_hour = urgent and run_context.current().urgent_after_hours
+    slots, email_time = reply_gaps(days, minutes, any_hour)
+    return _pick_slot(slots, [] if urgent else email_time, minutes)
 
 
 def find_event_for_message(message_id: str) -> dict | None:
