@@ -2,8 +2,7 @@
 
 Each one is a plain function: the code calls it directly for the required
 minimum, and Claude can call the ones in ALL as tools for anything beyond that.
-apply_label, draft_reply and block_time change the real Gmail inbox and calendar;
-add_to_digest only prints until its real behaviour is specced.
+apply_label, draft_reply and block_time change the real Gmail inbox and calendar.
 """
 
 from email.utils import getaddresses
@@ -71,16 +70,6 @@ def apply_label(message_id: str, label_name: str, sublabel: str | None = None) -
     # The parent goes on too, so the email still shows under the parent label.
     gmail.add_labels(message_id, [parent["id"], sub_id])
     return f"labelled {parent['name']} and {full_name}{new}"
-
-
-def add_to_digest(summary: str) -> str:
-    """Add the email to the user's daily summary.
-
-    Args:
-        summary: One sentence describing the email.
-    """
-    print(f"[action] add to digest: {summary}")
-    return "added to digest"
 
 
 def block_time(message_id: str, title: str, minutes: int, notes: str, urgent: bool = False) -> str:
@@ -169,6 +158,6 @@ def _others_on_thread(original: dict, to: str) -> list[str]:
 
 
 # draft_reply is left out on purpose: drafts only come from the write-reply skill.
-ALL = [apply_label, add_to_digest, block_time, find_free_slots]
+ALL = [apply_label, block_time, find_free_slots]
 # parse_docstring turns each Args entry into that argument's description.
 TOOLS = [tool(fn, parse_docstring=True) for fn in ALL]

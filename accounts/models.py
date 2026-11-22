@@ -121,7 +121,6 @@ class ProcessedEmail(models.Model):
 
     class Urgency(models.TextChoices):
         NOT_URGENT = "not_urgent", "Not urgent"
-        FOR_SUMMARY = "for_summary", "For summary"
         SCHEDULE_TIME = "schedule_time", "Schedule time"
         INSTANT = "instant", "Instant"
 

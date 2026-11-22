@@ -63,7 +63,7 @@ Versions are the ones installed in `.venv`. `requirements.txt` doesn't pin any.
 
 - LangChain v1 with `langchain-anthropic` (`ChatAnthropic`), model `claude-sonnet-5-5` (set in `agent.py`). The `anthropic` SDK stays as a dependency: LangChain calls it, and its error classes are what the runners catch.
 - **One-shot calls:** `agent.ask` wraps `with_structured_output(..., method="json_schema")`, Claude's native structured output. Classification, reply drafting and the sub-label cleanup judge all use it.
-- **Classification:** one `agent.ask` call per email. A dynamic pydantic model returns up to 3 labels with sub-labels, an urgency, the minutes needed, whether a reply is needed, and a summary.
+- **Classification:** one `agent.ask` call per email. A dynamic pydantic model returns up to 3 labels with sub-labels, an urgency, the minutes needed, and whether a reply is needed.
 - **Label rules:** `labels.md` describes each label to the classifier.
 - **Reply drafting:** a separate call guided by `skills/write-reply/SKILL.md`. Replies are saved as Gmail drafts and never sent.
 - **Extra actions:** `langchain.agents.create_agent` with the functions in `actions.py` wrapped by `langchain_core.tools.tool`. `ModelCallLimitMiddleware` stops the loop after 5 Claude calls, and parallel tool calls are turned off because the Google API clients aren't thread-safe.

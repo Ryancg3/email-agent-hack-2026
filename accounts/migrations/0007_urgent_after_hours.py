@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("accounts", "0005_gmail_push"),
+        ("accounts", "0006_remove_for_summary_urgency"),
     ]
 
     operations = [

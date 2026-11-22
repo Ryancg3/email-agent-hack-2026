@@ -248,7 +248,6 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 }
 .badge-instant, .badge-error { color: var(--danger); background: var(--danger-soft); }
 .badge-schedule_time { color: var(--warning); background: var(--warning-soft); }
-.badge-for_summary { color: var(--info); background: var(--info-soft); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 
 .status {

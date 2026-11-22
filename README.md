@@ -16,9 +16,9 @@ as drafts, never sent.
 2. **Classify** (Claude). Picks 0 to 3 labels from your Gmail labels, using the
    label descriptions each user edits on the web app's Labels tab (new users start
    from [labels.md](labels.md), which the CLI uses). Also returns the urgency, the minutes
-   needed to reply, whether a reply is needed, and a one-sentence summary.
+   needed to reply, and whether a reply is needed.
 3. **Required actions** (code). Applies the labels, then runs the action for the
-   urgency: `for_summary` adds the email to the digest, `schedule_time` blocks
+   urgency: `not_urgent` needs nothing more, `schedule_time` blocks
    calendar time next to other email time (usually within a day), and `instant`
    blocks the first free time, within the hour unless meetings are in the way.
    Reply blocks start 5 to 10 minutes after a meeting ends and never sit right

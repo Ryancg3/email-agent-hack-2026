@@ -25,7 +25,7 @@ MODEL = "claude-sonnet-5-5"
 DEFAULT_COUNT = 5
 SKILLS_DIR = Path(__file__).parent / "skills"
 
-Urgency = Literal["not_urgent", "for_summary", "schedule_time", "instant"]
+Urgency = Literal["not_urgent", "schedule_time", "instant"]
 
 SYSTEM_PROMPT = """You triage incoming emails. Return one result per email with the fields below.
 
@@ -35,8 +35,7 @@ labels (list)
 Pick 0 to 3 labels from the allowed labels, best fit first. Each label's description says what belongs under it and what doesn't; follow it. Usually one label is right. Add another only when the email clearly belongs under it too. If no label fits, return an empty list rather than forcing one.
 
 urgency (one value)
-- not_urgent: no attention needed
-- for_summary: worth knowing, can wait for a digest
+- not_urgent: no prompt attention needed, including emails worth knowing about that can wait
 - schedule_time: needs a reply that takes some time to prepare, and can wait for the next block of email time, usually within a day
 - instant: super urgent, needs an answer within the hour; rare, for example a same-day deadline, a problem that is happening now, or a person blocked until the user answers
 
@@ -45,9 +44,6 @@ How many minutes the user needs to respond to the email, for example to find a m
 
 needs_reply (true or false)
 True only if a person is waiting for a written answer from the user. False for newsletters, notifications, receipts and no-reply senders.
-
-summary (string)
-One sentence.
 
 sub-labels (one entry per label in labels)
 For each label:
@@ -81,7 +77,6 @@ def result_model(label_names: list[str]) -> type[BaseModel]:
         urgency=(Urgency, ...),
         minutes_needed=(int, ...),
         needs_reply=(bool, ...),
-        summary=(str, ...),
     )
 
 
@@ -154,9 +149,9 @@ def sender_name(email: Email) -> str:
 
 
 def block_notes(email: Email, result) -> str:
-    """Description for the calendar block: who, what, how it was labelled."""
+    """Description for the calendar block: who, about what, how it was labelled."""
     picked = ", ".join(choice.label for choice in result.labels) or "none"
-    return f"From: {email.sender}\nSubject: {email.subject}\nLabels: {picked}\n\n{result.summary}"
+    return f"From: {email.sender}\nSubject: {email.subject}\nLabels: {picked}"
 
 
 # The minimum that always happens, run by code (not Claude): labelling, then the
@@ -173,7 +168,6 @@ def reply_block(urgent: bool):
 
 REQUIRED = {
     "not_urgent": [],
-    "for_summary": [(actions.add_to_digest, lambda email, r: {"summary": r.summary})],
     # Grouped with other email time, usually within a day.
     "schedule_time": [(actions.block_time, reply_block(urgent=False))],
     # Not grouped: the first free time, so right after the meeting the user is in.
