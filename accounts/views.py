@@ -18,7 +18,7 @@ import labels
 import run_context
 
 from . import cleanup_runner, google_connect, push, runner
-from .forms import LabelFormSet, SettingsForm, SignupForm
+from .forms import LABELS_MAX, LabelFormSet, SettingsForm, SignupForm
 from .models import GoogleConnection, Label, ProcessedEmail, seed_labels, user_labels
 
 
@@ -152,7 +152,10 @@ def labels_page(request):
         missing = [name for k, name in in_gmail.items() if k not in described]
         for form in formset:
             form.not_in_gmail = bool(form.instance.pk) and labels.key(form.initial.get("name", "")) not in in_gmail
-    return render(request, "accounts/labels.html", {"formset": formset, "missing": missing, "problem": problem})
+    return render(request, "accounts/labels.html", {
+        "formset": formset, "missing": missing, "problem": problem,
+        "label_count": request.user.labels.count(), "labels_max": LABELS_MAX,
+    })
 
 
 def _save_labels(user, formset) -> None:
@@ -178,15 +181,24 @@ def add_missing_labels(request):
     labels_now = user_labels(request.user)
     described = {labels.key(label.name) for label in labels_now}
     position = max((label.position for label in labels_now), default=-1) + 1
-    added = []
+    added, skipped = [], 0
     for name in gmail_names:
         if "/" in name or labels.key(name) in described:
             continue
+        described.add(labels.key(name))
+        if len(labels_now) + len(added) >= LABELS_MAX:
+            skipped += 1
+            continue
         emoji, plain = labels.split_emoji(name)
         added.append(Label(user=request.user, position=position + len(added), emoji=emoji, name=plain))
-        described.add(labels.key(name))
     Label.objects.bulk_create(added)
-    messages.success(request, f"Added {len(added)} label{'s' if len(added) != 1 else ''}. Describe them below.")
+    if not added and skipped:
+        messages.error(request, f"You can have at most {LABELS_MAX} labels. Delete one to add another.")
+        return redirect("labels")
+    message = f"Added {len(added)} label{'s' if len(added) != 1 else ''}. Describe them below."
+    if skipped:
+        message += f" {skipped} more didn't fit: you can have at most {LABELS_MAX} labels."
+    messages.success(request, message)
     return redirect("labels")
 
 

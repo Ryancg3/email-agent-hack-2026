@@ -99,12 +99,11 @@ A new optional line in each `labels.md` section, next to `Sub-labels:`. It follo
 
 | Label | `Cleanup:` |
 | ----- | ---------- |
-| University | after the course's exam period; never the thesis |
-| Job Applications | once rejected, withdrawn, or silent for two months |
+| Work | once the project is finished or silent for two months |
+| Coding | once the repository or project has been quiet for two months |
 | Travel | after the trip is over |
 | Events | after the event date |
 | Medical | never |
-| phd admissions | once a decision has come in or the cycle has closed |
 
 Labels with `Sub-labels: never` need no `Cleanup:` line. A label without one gets the default judgment.
 
@@ -153,11 +152,11 @@ The Gmail scope `gmail.modify` already allows deleting labels, so users don't ne
 | `Travel/Lisbon` | 4 conversations, last 50 days ago, trip Nov 20 to 25 | keep, recheck Dec 9 (trip end + 14 days) |
 | `Travel/Paris` | 3 conversations, last 50 days ago, trip ended Oct 19 | model says delete, code keeps until Nov 2 (grace period) |
 | `Travel/Rome` | 6 conversations, last 60 days ago, trip was in August | delete |
-| `Events/Berlin Hackathon` | 2 conversations, event was last week | not a candidate yet (last email 7 days ago) |
-| `Job Applications/Acme ML Engineer` | 1 conversation, 20 days ago, "we'll get back to you in January" | keep, recheck in January |
-| `Job Applications/Foo Data Scientist` | 3 conversations, rejection 50 days ago | delete |
+| `Events/Summer Conference` | 2 conversations, event was last week | not a candidate yet (last email 7 days ago) |
+| `Work/Acme Website` | 1 conversation, 20 days ago, "we'll pick this up again in January" | keep, recheck in January |
+| `Work/Foo Migration` | 3 conversations, "project wrapped up" 50 days ago | delete |
 | `Medical/Dr Weber` | parent is `Cleanup: never` | never reviewed |
-| `University` | top-level | never considered |
+| `Travel` | top-level | never considered |
 
 ## Acceptance criteria
 

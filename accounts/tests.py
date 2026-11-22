@@ -1,10 +1,12 @@
 import base64
+import importlib
 import json
 from datetime import datetime, time, timedelta, timezone
 from io import StringIO
 from types import SimpleNamespace
 from unittest import mock
 
+from django.apps import apps
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone as django_timezone
@@ -332,7 +334,7 @@ class LabelsTabTests(TestCase):
         self.client.force_login(self.user)
         patcher = mock.patch.object(
             runner.gmail, "list_labels",
-            return_value=[{"name": "✈️ Travel"}, {"name": "✈️ Travel/Rome"}, {"name": "Work"}],
+            return_value=[{"name": "✈️ Travel"}, {"name": "✈️ Travel/Rome"}, {"name": "Hobbies"}],
         )
         self.list_labels = patcher.start()
         self.addCleanup(patcher.stop)
@@ -349,9 +351,10 @@ class LabelsTabTests(TestCase):
         self.assertEqual(auth.exclude, "Not warnings about your account (Alerts).")
         finance = self.user.labels.get(name="Finance")
         self.assertTrue(finance.exclude.endswith("not health insurance (Medical)."))
-        self.assertEqual(self.user.labels.get(name="University").cleanup, "after the course's exam period; never the thesis")
+        self.assertEqual(self.user.labels.get(name="Travel").cleanup, "after the trip is over")
+        self.assertFalse(self.user.labels.filter(name="University").exists())
         self.assertEqual(self.user.labels.count(), len(labels.parse(labels.LABELS_FILE.read_text())))
-        self.assertContains(response, "In Gmail but not described: Work")
+        self.assertContains(response, "In Gmail but not described: Hobbies")
         self.assertContains(response, "Not in Gmail")
 
     def test_signup_gets_the_default_labels(self, _):
@@ -392,27 +395,81 @@ class LabelsTabTests(TestCase):
         Label.objects.create(user=self.user, name="Mine")
         names = [f"Label {chr(65 + i // 26)}{chr(65 + i % 26)}" for i in range(LABELS_MAX + 1)]
         response = self.client.post(reverse("labels"), formset_data([{"name": name} for name in names]))
-        self.assertContains(response, f"Please submit at most {LABELS_MAX} forms.")
+        self.assertContains(response, f"You can have at most {LABELS_MAX} labels. Delete one to add another.")
         self.assertEqual(self.rows(), [("", "Mine")])
 
     def test_add_missing_gmail_labels(self, _):
         self.user.labels.all().delete()
         Label.objects.create(user=self.user, name="Travel")
         self.client.post(reverse("add_missing_labels"))
-        self.assertEqual(self.rows(), [("", "Travel"), ("", "Work")])
+        self.assertEqual(self.rows(), [("", "Travel"), ("", "Hobbies")])
+
+    def test_add_missing_stays_within_the_limit(self, _):
+        self.list_labels.return_value = [{"name": "Hobbies"}, {"name": "Sport"}]
+        self.user.labels.all().delete()
+        Label.objects.bulk_create(Label(user=self.user, position=i, name=f"Mine {chr(65 + i)}") for i in range(LABELS_MAX - 1))
+        response = self.client.post(reverse("add_missing_labels"), follow=True)
+        self.assertContains(response, f"Added 1 label. Describe them below. 1 more didn&#x27;t fit: you can have at most {LABELS_MAX} labels.")
+        self.assertEqual(self.user.labels.count(), LABELS_MAX)
+
+    def test_shows_the_label_count(self, _):
+        self.user.labels.all().delete()
+        Label.objects.create(user=self.user, name="Travel")
+        self.assertContains(self.client.get(reverse("labels")), f"1 of {LABELS_MAX} labels")
+        Label.objects.bulk_create(Label(user=self.user, position=i + 1, name=f"Mine {chr(65 + i)}") for i in range(LABELS_MAX - 1))
+        self.assertContains(self.client.get(reverse("labels")), f"{LABELS_MAX} of {LABELS_MAX} labels. Delete one to add another.")
 
     def test_reset_to_defaults(self, _):
         self.user.labels.all().delete()
         Label.objects.create(user=self.user, name="Mine")
         self.client.post(reverse("reset_labels"))
         self.assertFalse(self.user.labels.filter(name="Mine").exists())
-        self.assertTrue(self.user.labels.filter(name="University").exists())
+        self.assertTrue(self.user.labels.filter(name="Coding").exists())
 
     def test_works_without_google(self, _):
         self.user.google.delete()
         response = self.client.get(reverse("labels"))
         self.assertContains(response, "Connect Google to check")
         self.list_labels.assert_not_called()
+
+
+class NewDefaultLabelsMigrationTests(TestCase):
+    migration = importlib.import_module("accounts.migrations.0009_new_default_labels")
+
+    def test_adds_new_defaults_and_keeps_own_labels(self):
+        user = make_connected_user()
+        user.labels.all().delete()
+        Label.objects.create(user=user, emoji="🎓", name="University", include="Courses.")
+        Label.objects.create(user=user, position=1, emoji="🛠️", name="coding", include="My own.")
+        untouched = make_connected_user("b@example.com")
+        untouched.labels.all().delete()
+
+        self.migration.add_new_labels(apps, None)
+
+        rows = [(label.name, label.position, label.include) for label in user.labels.all()]
+        self.assertEqual([name for name, _, _ in rows], ["University", "coding", "Work", "Personal"])
+        self.assertEqual(rows[0][2], "Courses.")
+        self.assertEqual(rows[1][2], "My own.")
+        self.assertEqual(user.labels.get(name="Work").sublabels, "one per project or client")
+        self.assertFalse(untouched.labels.exists())
+
+    def test_stays_within_the_editor_limit(self):
+        user = make_connected_user()
+        user.labels.all().delete()
+        Label.objects.bulk_create(Label(user=user, position=i, name=f"Mine {chr(65 + i)}") for i in range(LABELS_MAX - 1))
+
+        self.migration.add_new_labels(apps, None)
+
+        self.assertEqual(user.labels.count(), LABELS_MAX)
+        self.assertEqual(user.labels.last().name, "Work")
+        self.assertEqual(self.migration.LABELS_MAX, LABELS_MAX)
+
+    def test_matches_labels_md(self):
+        defaults = labels.parse(labels.LABELS_FILE.read_text())
+        for label in self.migration.NEW_LABELS:
+            self.assertEqual(defaults[labels.key(label["name"])], {
+                field: label[field] for field in ("name", "emoji", "sublabels", "cleanup", "include", "exclude")
+            })
 
 
 class LabelsPerRunTests(TestCase):
@@ -433,7 +490,7 @@ class LabelsPerRunTests(TestCase):
             first, second = runner.context(first), runner.context(second)
         with run_context.use(first):
             self.assertEqual(labels.describe("Travel"), "Travel: Flights. Not events. Sub-labels: one per trip.")
-            self.assertFalse(labels.is_described("University"))
+            self.assertFalse(labels.is_described("Medical"))
         with run_context.use(second):  # no labels yet: starts from labels.md
             self.assertTrue(labels.describe("Travel").startswith("Travel: Flights, trains, hotels"))
 
