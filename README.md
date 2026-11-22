@@ -18,7 +18,7 @@ as drafts, never sent.
    from [labels.md](labels.md), which the CLI uses). Also returns the urgency, the minutes
    needed to reply, whether a reply is needed, and a one-sentence summary.
 3. **Required actions** (code). Applies the labels, then runs the action for the
-   urgency: `for_summary` adds the email to the digest, `schedule_time` blocks
+   urgency: `not_urgent` needs nothing more, `schedule_time` blocks
    calendar time, and `instant` does the same as `schedule_time` for now (instant
    notifications aren't built yet).
 4. **Draft reply** (Claude). Runs only when a reply is needed. Follows

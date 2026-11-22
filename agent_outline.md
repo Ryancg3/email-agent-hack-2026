@@ -27,7 +27,7 @@ Define each component before writing any skill. Fill in the right column for you
 | Tools        | APIs, MCP servers, file access, web search           | gmail & gcal MCP                    |
 | Memory       | What persists between runs, and where it is stored   | topics&#32;                         |
 | Loop         | Plan, act, observe, repeat; max steps per run        | Per email: classify (one call), run required actions in code, draft a reply if `needs_reply` (one call), then Claude calls tools for extras; max 5 steps |
-| Subagents    | Which tasks get delegated, and what each returns     | Classifier today; digest writer planned (see Subagents) |
+| Subagents    | Which tasks get delegated, and what each returns     | Classifier |
 | Triggers     | Chat, schedule, webhook, or another agent            | incoming emails                     |
 |              |                                                      |                                     |
 
@@ -45,7 +45,6 @@ A tool is a function the agent can call: a name, a description, typed inputs, an
 | ---- | ------------ | ------ | ------- | --------- | -------------- |
 | `apply_label` | Applies a Gmail label to the email (real Gmail), plus an optional sub-label under it (`Parent/Child`), created if new. The parent is applied too. Sub-labels are one level deep, and never under labels whose rule in `labels.md` is `never` (Authorisations, Alerts, Newsletters, Shopping). An email holds at most 3 of your labels, sub-labels included | message id, top-level label name, optional sub-label name | `labelled <name>`, `labelled <name> and <name>/<sub> (new sub-label)`, or an error | Code (every email) and agent | No |
 | `notify_now` | Alerts the user right away (stub: prints) | one-sentence summary | `notified` | Code (`instant`) and agent | No |
-| `add_to_digest` | Adds the email to the daily digest (stub: prints) | one-sentence summary | `added to digest` | Code (`for_summary`) and agent | No |
 | `block_time` | Blocks calendar time to respond to the email (stub: prints). Should pick a slot before any deadline, inside working hours, not overlapping | title, minutes | the blocked slot | Code (`schedule_time`) and agent | No |
 | `draft_reply` | Saves a reply as a Gmail draft in the email's thread; never sends. Reply all adds the other To/Cc recipients (not you), except for mailing lists or more than 10 recipients, and puts a check note at the top for you to delete. Skips if the thread already has a draft | message id, body, reply all, reason | `draft saved`, `draft saved, reply all`, `draft saved to sender only (...)`, or `skipped` | Code only (`needs_reply`, after `write-reply`); not an agent tool | No (draft only) |
 | `find_free_slots` (planned) | Finds free calendar slots for a meeting | minutes, latest date | list of free slots | Agent | No |
@@ -108,7 +107,6 @@ A subagent is a separate model call with its own instructions, tools and context
 | Subagent | Task delegated | Inputs | Returns | Model | Tools |
 | -------- | -------------- | ------ | ------- | ----- | ----- |
 | classifier | Triage one email (already a separate call in `agent.py`) | email, top-level labels (read from Gmail per email) with their description and sub-label rule from `labels.md` and their existing sub-labels | 0 to 3 labels (none if nothing fits), each with whether a sub-label is needed and its name (at most 3 labels in total, sub-labels included), urgency, minutes needed, summary | Opus 5.5 today; try Haiku 5.5 after measuring | none |
-| digest writer (planned) | Summarise the day's digest items, once a day | that day's `add_to_digest` items | one short summary | a cheaper model, e.g. Haiku 5.5 | none |
 |          |                |        |         |       |       |
 
 ## Guardrails and evaluation

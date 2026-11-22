@@ -525,10 +525,10 @@ RESULT = SimpleNamespace(model_dump_json=lambda indent=None: "{}")
 
 
 class LangChainAgentTests(SimpleTestCase):
-    def test_tools_are_the_four_actions_with_argument_descriptions(self):
+    def test_tools_are_the_three_actions_with_argument_descriptions(self):
         self.assertEqual(
             [t.name for t in actions.TOOLS],
-            ["apply_label", "add_to_digest", "block_time", "find_free_slots"],
+            ["apply_label", "block_time", "find_free_slots"],
         )
         for t in actions.TOOLS:
             for name, schema in t.args.items():
@@ -537,33 +537,33 @@ class LangChainAgentTests(SimpleTestCase):
     def test_act_runs_a_tool_in_the_users_context_one_at_a_time(self):
         seen = []
 
-        def add_to_digest(summary: str) -> str:
-            """Add the email to the digest."""
+        def take_note(summary: str) -> str:
+            """Take a note about the email."""
             seen.append((summary, run_context.current()))
-            return "added to digest"
+            return "noted"
 
-        fake = FakeClaude(messages=iter([tool_call("add_to_digest", {"summary": "Bob says hi"}), AIMessage(content="Added to the digest.")]), bound=[])
+        fake = FakeClaude(messages=iter([tool_call("take_note", {"summary": "Bob says hi"}), AIMessage(content="Noted.")]), bound=[])
         ctx = run_context.RunContext(None)
         with mock.patch.object(agent, "act_model", lambda: fake), mock.patch.object(
-            actions, "TOOLS", [tool(add_to_digest)]
+            actions, "TOOLS", [tool(take_note)]
         ), run_context.use(ctx), mock.patch("builtins.print") as printed:
             agent.act(EMAIL, RESULT, [])
         self.assertEqual(seen, [("Bob says hi", ctx)])
         self.assertTrue(fake.bound and all(kwargs["parallel_tool_calls"] is False for kwargs in fake.bound))
-        printed.assert_called_with("[agent]", "Added to the digest.")
+        printed.assert_called_with("[agent]", "Noted.")
 
     def test_act_stops_after_max_steps(self):
         calls = []
 
-        def add_to_digest(summary: str) -> str:
-            """Add the email to the digest."""
+        def take_note(summary: str) -> str:
+            """Take a note about the email."""
             calls.append(summary)
-            return "added to digest"
+            return "noted"
 
-        endless = (tool_call("add_to_digest", {"summary": str(n)}) for n in range(100))
+        endless = (tool_call("take_note", {"summary": str(n)}) for n in range(100))
         fake = FakeClaude(messages=endless, bound=[])
         with mock.patch.object(agent, "act_model", lambda: fake), mock.patch.object(
-            actions, "TOOLS", [tool(add_to_digest)]
+            actions, "TOOLS", [tool(take_note)]
         ), run_context.use(run_context.RunContext(None)), mock.patch("builtins.print"):
             agent.act(EMAIL, RESULT, [])
         self.assertEqual(len(calls), agent.MAX_STEPS)
