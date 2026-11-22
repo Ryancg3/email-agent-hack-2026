@@ -69,12 +69,16 @@ def dashboard(request):
 
 def _render_dashboard(request, form):
     connection = GoogleConnection.objects.filter(user=request.user).first()
+    handled_today = request.user.processed_emails.filter(
+        status=ProcessedEmail.Status.OK, processed_at__date=timezone.localdate()
+    ).count()
     failed = request.user.processed_emails.filter(
         status=ProcessedEmail.Status.ERROR, processed_at__gte=timezone.now() - timedelta(hours=24)
     )
     return render(request, "accounts/dashboard.html", {
         "connection": connection,
         "form": form,
+        "handled_today": handled_today,
         "failed_count": failed.count(),
         "latest_failure": failed.first(),
         "cleanup": cleanup_runner.last_result(request.user) if connection else None,
