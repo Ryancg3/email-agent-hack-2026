@@ -18,24 +18,34 @@ def at(hour: int, minute: int = 0) -> datetime:
     return datetime(*DAY, hour, minute, tzinfo=TZ)
 
 
-class ReplySlotTests(SimpleTestCase):
-    """The calendar is faked: busy periods as freebusy gives them (in UTC, like
-    Google), and the email-time events the agent groups with."""
+def event(start, end, title="Meeting", **extra):
+    return {"summary": title, "start": {"dateTime": start.isoformat()},
+            "end": {"dateTime": end.isoformat()}, **extra}
 
-    def place(self, now, meetings, minutes=15, urgent=False, email_time=(), after_hours=False):
-        email_time = list(email_time)
-        busy = sorted(
-            (s.astimezone(ZoneInfo("UTC")), e.astimezone(ZoneInfo("UTC")))
-            for s, e in [*meetings, *email_time]
-        )
+
+class ReplySlotTests(SimpleTestCase):
+    """The calendar is faked: the events Google lists for the queried range."""
+
+    def place(self, now, meetings, minutes=15, urgent=False, email_time=(), after_hours=False,
+              extra_events=(), until=datetime(2026, 11, 28, tzinfo=TZ)):
+        events = [
+            *(event(s, e) for s, e in meetings),
+            *(event(s, e, "Email time") for s, e in email_time),
+            *extra_events,
+        ]
+
+        def listed(start, end):
+            # Like Google: events that overlap the range.
+            return [e for e in events
+                    if datetime.fromisoformat(e["end"]["dateTime"]) > start
+                    and datetime.fromisoformat(e["start"]["dateTime"]) < end]
+
         ctx = run_context.RunContext(creds=None, work_start=time(9), work_end=time(18),
                                      urgent_after_hours=after_hours)
-        window = (now, datetime(2026, 11, 28, tzinfo=TZ))
         with run_context.use(ctx), \
                 mock.patch.object(gcal, "_timezone", return_value=TZ), \
-                mock.patch.object(gcal, "_window", return_value=window), \
-                mock.patch.object(gcal, "_busy", return_value=busy), \
-                mock.patch.object(gcal, "_email_blocks", return_value=email_time):
+                mock.patch.object(gcal, "_window", return_value=(now, until)), \
+                mock.patch.object(gcal, "_events", side_effect=listed):
             slot, _ = gcal.reply_slot(minutes, urgent=urgent)
         return slot
 
@@ -94,3 +104,25 @@ class ReplySlotTests(SimpleTestCase):
     def test_after_hours_setting_leaves_normal_replies_in_working_hours(self):
         slot = self.place(at(20), [], after_hours=True)
         self.assertEqual(slot[0], datetime(2026, 11, 24, 9, tzinfo=TZ))
+
+    def test_meeting_that_just_ended_keeps_its_buffer(self):
+        # The run's window starts at 10:30, after the meeting ended at 10:29.
+        slot = self.place(at(10, 30), [(at(10), at(10, 29))], urgent=True)
+        self.assertEqual(slot[0], at(10, 35))
+
+    def test_after_hours_gap_runs_across_midnight(self):
+        night = datetime(2026, 11, 24, tzinfo=TZ)
+        meeting = (night.replace(minute=40), night.replace(hour=2))
+        slot = self.place(at(23, 45), [meeting], minutes=30, urgent=True, after_hours=True)
+        self.assertEqual(slot, (at(23, 45), night.replace(minute=15)))
+
+    def test_meeting_under_email_time_keeps_its_buffers(self):
+        both = [(at(11), at(12))]
+        slot = self.place(at(10, 30), both, minutes=25, urgent=True, email_time=both)
+        self.assertEqual(slot, (at(12, 5), at(12, 30)))
+
+    def test_declined_and_free_events_are_not_meetings(self):
+        declined = event(at(10), at(11), attendees=[{"self": True, "responseStatus": "declined"}])
+        free = event(at(10), at(11), transparency="transparent")
+        slot = self.place(at(10), [], urgent=True, extra_events=[declined, free])
+        self.assertEqual(slot[0], at(10))
