@@ -15,7 +15,7 @@ as drafts, never sent.
    `token.json` account.
 2. **Classify** (Claude). Picks 0 to 3 labels from your Gmail labels, using the
    label descriptions each user edits on the web app's Labels tab (new users start
-   from [labels.md](labels.md), which the CLI uses). Also returns the urgency, the minutes
+   from [triage/labels.md](triage/labels.md), which the CLI uses). Also returns the urgency, the minutes
    needed to reply, and whether a reply is needed.
 3. **Required actions** (code). Applies the labels, then runs the action for the
    urgency: `not_urgent` needs nothing more, `schedule_time` blocks
@@ -26,13 +26,23 @@ as drafts, never sent.
    Reply time stays within working hours, unless the user turns on "Super-urgent
    emails after hours" in Settings, which lets `instant` blocks go in the evening and at weekends.
 4. **Draft reply** (Claude). Runs only when a reply is needed. Follows
-   [skills/write-reply/SKILL.md](skills/write-reply/SKILL.md) and saves a Gmail draft.
+   [triage/skills/write-reply/SKILL.md](triage/skills/write-reply/SKILL.md) and saves a Gmail draft.
 5. **Extra actions** (Claude). A tool loop of at most 5 steps that can call the
-   tools in [actions.py](actions.py) for anything beyond the required minimum.
+   tools in [triage/actions.py](triage/actions.py) for anything beyond the required minimum.
 
 See [docs/system-design.md](docs/system-design.md) for the infrastructure, its
 trade-offs and where it breaks first. The first agent outline and the old feature
 specs are in [docs/archive/](docs/archive/); they are no longer updated.
+
+## Repo layout
+
+| Folder | What's in it |
+| --- | --- |
+| `triage/` | The email triage itself (no Django): the fixed pipeline (`pipeline.py`), the agent step (`agent.py`), actions, Gmail and Calendar wrappers, labels, skills |
+| `accounts/` | The Django app: users, models, views, templates, the scheduler and the per-user runner |
+| `config/` | Django settings and URLs |
+| `deploy/` | Container entrypoint (`Dockerfile`, `railway.json` and `render.yaml` stay at the root for the hosts) |
+| `docs/` | System design, tech stack, hosting and Gmail push guides |
 
 ## Setup
 

@@ -105,7 +105,7 @@ Steps 1 to 3 are the **required minimum**: code always runs them, in that order,
 they happen even if Claude takes no extra steps. Step 4 is Claude's own choice and is
 often empty. The labels Claude may pick, and what each one is for, come from the
 user's label descriptions on the Labels page (new users start from
-[labels.md](../labels.md)).
+[triage/labels.md](../triage/labels.md)).
 
 `instant` is for the rare super-urgent email: a same-day deadline, a problem happening
 now, or someone blocked until the user answers. Event reminders and one-time or
@@ -142,7 +142,7 @@ flowchart TD
 work in batches; urgent replies skip the grouping and take the first free time. If
 nothing fits in the next 5 days, the block is skipped and a line is printed to the
 scheduler log. The email is still saved as `ok`, so the dashboard doesn't show it.
-Emails more than 5 days old (`MAX_BLOCK_AGE` in `actions.py`) are never blocked, so
+Emails more than 5 days old (`MAX_BLOCK_AGE` in `triage/actions.py`) are never blocked, so
 rerunning the agent over old mail (`make agent N=200`) adds no reply time to the
 calendar. Labels and drafts are still applied as usual.
 
@@ -215,7 +215,7 @@ Everything in one tick runs in sequence: one user at a time, one email at a time
 Only users whose agent is enabled and whose Google connection is `connected` are run
 (Run now works even with the agent switched off).
 
-**Sub-label cleanup** is a separate, monthly job (`sublabel_cleanup.py`). Code picks
+**Sub-label cleanup** is a separate, monthly job (`triage/sublabel_cleanup.py`). Code picks
 sub-labels that have gone quiet, Claude decides keep or delete for each, and each
 decision is saved as a `SublabelReview`. It only deletes when the user has turned
 cleanup on; otherwise it reports what it would delete. Its errors never touch the
@@ -327,8 +327,8 @@ What lives where:
 - **In Gmail and Calendar:** everything the user sees. Labels, sub-labels, drafts and
   calendar blocks are real Gmail and Calendar objects. The app keeps no copy of email
   content; it reads each email, sends it to Claude, and keeps only the subject.
-- **In the repo:** the default labels (`labels.md`), the reply-writing instructions
-  (`skills/write-reply/SKILL.md`), and the prompts (`agent.py`).
+- **In the repo:** the default labels (`triage/labels.md`), the reply-writing instructions
+  (`triage/skills/write-reply/SKILL.md`), and the prompts (`triage/pipeline.py`, `triage/agent.py`).
 
 ## Choices and trade-offs
 
@@ -380,17 +380,18 @@ What breaks, what the user sees, what the app does about it, and how to fix it.
 
 | Area | Files |
 |---|---|
-| The agent (classify, required steps, draft, tool loop) | `agent.py` |
-| Actions the code and Claude call | `actions.py` |
-| Google API wrappers | `gmail.py`, `gcal.py`, `google_auth.py` (CLI only) |
-| Whose account a run uses | `run_context.py` |
-| Label descriptions | `labels.py`, `labels.md`, `accounts.models.Label` |
-| Reply-writing instructions | `skills/write-reply/SKILL.md` |
+| The fixed steps (classify, required actions, draft) | `triage/pipeline.py` |
+| The agent step (tool loop, 5-step limit) | `triage/agent.py` |
+| Actions the code and Claude call | `triage/actions.py` |
+| Google API wrappers | `triage/gmail.py`, `triage/gcal.py`, `triage/google_auth.py` (CLI only) |
+| Whose account a run uses | `triage/run_context.py` |
+| Label descriptions | `triage/labels.py`, `triage/labels.md`, `accounts.models.Label` |
+| Reply-writing instructions | `triage/skills/write-reply/SKILL.md` |
 | Running the agent for one web user | `accounts/runner.py` |
 | Scheduler loop | `accounts/management/commands/run_scheduler.py` |
 | Gmail push (webhook, watches) | `accounts/push.py`, `accounts/views.py` (`gmail_push`) |
 | Google connect (OAuth web flow, token encryption) | `accounts/google_connect.py`, `accounts/views.py` |
-| Sub-label cleanup | `sublabel_cleanup.py`, `accounts/cleanup_runner.py` |
+| Sub-label cleanup | `triage/sublabel_cleanup.py`, `accounts/cleanup_runner.py` |
 | Data model | `accounts/models.py` |
 | Hosting | `Dockerfile`, `deploy/start.sh`, `railway.json`, `render.yaml` |
 
@@ -400,4 +401,4 @@ What breaks, what the user sees, what the app does about it, and how to fix it.
 - [deploy-railway.md](deploy-railway.md) and [deploy-render.md](deploy-render.md): hosting.
 - [archive/](archive/): the first agent outline and the feature specs for sub-label
   cleanup and per-user labels. Kept for history, no longer updated.
-- [../STACK.md](../STACK.md): libraries and versions.
+- [stack.md](stack.md): libraries and versions.

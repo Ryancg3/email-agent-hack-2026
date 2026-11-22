@@ -6,8 +6,8 @@ from datetime import timedelta
 from django.utils import timezone
 from google.auth.exceptions import RefreshError
 
-import run_context
-import sublabel_cleanup
+from triage import run_context
+from triage import sublabel_cleanup
 
 from . import runner
 from .models import GoogleConnection, SublabelReview, User

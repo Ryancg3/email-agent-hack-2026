@@ -1,14 +1,14 @@
 """Google Calendar access: free slots in the primary calendar and booking them.
 
 Usage:
-    python gcal.py [DAYS]    # print free slots for the next DAYS days (default 5)
+    python -m triage.gcal [DAYS]    # print free slots for the next DAYS days (default 5)
 """
 
 import sys
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-import run_context
+from . import run_context
 
 WORKDAYS = range(0, 5)  # Monday to Friday; working hours come from the run context
 

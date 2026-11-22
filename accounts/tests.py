@@ -15,11 +15,12 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 
-import actions
-import agent
-import labels
-import run_context
-import sublabel_cleanup
+from triage import actions
+from triage import agent
+from triage import pipeline
+from triage import labels
+from triage import run_context
+from triage import sublabel_cleanup
 
 from . import cleanup_runner, google_connect, push, reminder, runner
 from .management.commands import run_scheduler
@@ -261,7 +262,7 @@ class RunnerTests(TestCase):
             ],
             urgency="not_urgent",
         )
-        with mock.patch.object(runner.agent, "run", lambda email, labels: seen.append(email.id) or result):
+        with mock.patch.object(runner.pipeline, "run", lambda email, labels: seen.append(email.id) or result):
             runner.run_user(self.user)
         self.assertEqual(seen, ["m2", "m3"])
         self.assertEqual(self.user.processed_emails.filter(status="ok").count(), 3)
@@ -272,7 +273,7 @@ class RunnerTests(TestCase):
         ProcessedEmail.objects.create(user=self.user, message_id="m1", subject="old")
         seen = []
         result = SimpleNamespace(labels=[], urgency="not_urgent")
-        with mock.patch.object(runner.agent, "run", lambda email, labels: seen.append(email.id) or result):
+        with mock.patch.object(runner.pipeline, "run", lambda email, labels: seen.append(email.id) or result):
             runner.run_user(self.user, rerun_newest=3)
         runner.gmail.list_inbox_ids.assert_called_once_with(3)  # no connected_at cutoff
         self.assertEqual(seen, ["m1", "m2", "m3"])
@@ -282,7 +283,7 @@ class RunnerTests(TestCase):
         ProcessedEmail.objects.create(user=self.user, message_id="m2", status=ProcessedEmail.Status.SKIPPED)
         seen = []
         result = SimpleNamespace(labels=[], urgency="not_urgent")
-        with mock.patch.object(runner.agent, "run", lambda email, labels: seen.append(email.id) or result):
+        with mock.patch.object(runner.pipeline, "run", lambda email, labels: seen.append(email.id) or result):
             runner.run_user(self.user, rerun_newest=3)
         self.assertEqual(seen, ["m1", "m3"])
         self.assertEqual(self.user.processed_emails.get(message_id="m2").status, ProcessedEmail.Status.SKIPPED)
@@ -290,19 +291,19 @@ class RunnerTests(TestCase):
     def test_reply_skill_uses_the_users_name(self, _):
         self.user.first_name, self.user.last_name = "Ada", "Lovelace"
         skills = []
-        with mock.patch.object(runner.agent, "run", lambda email, labels: skills.append(runner.agent.load_skill("write-reply"))):
+        with mock.patch.object(runner.pipeline, "run", lambda email, labels: skills.append(runner.pipeline.load_skill("write-reply"))):
             runner.run_user(self.user)
         self.assertIn('Sign off with "Ada" for casual emails, "Ada Lovelace" for formal ones.', skills[0])
 
     def test_classifier_sees_the_users_label_descriptions(self, _):
         Label.objects.create(user=self.user, name="Work", sublabels="never", include="Projects at the office.")
         menus = []
-        with mock.patch.object(runner.agent, "run", lambda email, names: menus.append(agent.label_menu(names)[1])):
+        with mock.patch.object(runner.pipeline, "run", lambda email, names: menus.append(pipeline.label_menu(names)[1])):
             runner.run_user(self.user)
         self.assertEqual(menus[0], "- Work: Projects at the office. Sub-labels: never.")
 
     def test_failed_email_is_recorded_and_not_retried(self, _):
-        with mock.patch.object(runner.agent, "run", side_effect=ValueError("bad email")):
+        with mock.patch.object(runner.pipeline, "run", side_effect=ValueError("bad email")):
             runner.run_user(self.user)
         self.assertEqual(self.user.processed_emails.filter(status="error").count(), 3)
 
@@ -716,7 +717,7 @@ def tool_call(name, args):
     return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": f"call-{name}"}])
 
 
-EMAIL = agent.Email(id="m1", thread_id="t1", sender="Bob <bob@example.com>", to="a@example.com", cc="", subject="Hi", body="Hello")
+EMAIL = pipeline.Email(id="m1", thread_id="t1", sender="Bob <bob@example.com>", to="a@example.com", cc="", subject="Hi", body="Hello")
 RESULT = SimpleNamespace(model_dump_json=lambda indent=None: "{}")
 
 
@@ -766,15 +767,15 @@ class LangChainAgentTests(SimpleTestCase):
 
     def test_ask_returns_the_parsed_result_and_raises_on_refusal(self):
         answer = {"raw": AIMessage(content="", response_metadata={"stop_reason": "end_turn"}), "parsed": "parsed", "parsing_error": None}
-        with mock.patch.object(agent, "ChatAnthropic") as chat:
+        with mock.patch.object(pipeline, "ChatAnthropic") as chat:
             structured = chat.return_value.with_structured_output.return_value
             structured.invoke.return_value = answer
-            self.assertEqual(agent.ask("system", "user", agent.Reply, max_tokens=10), "parsed")
-            chat.return_value.with_structured_output.assert_called_once_with(agent.Reply, method="json_schema", include_raw=True)
+            self.assertEqual(pipeline.ask("system", "user", pipeline.Reply, max_tokens=10), "parsed")
+            chat.return_value.with_structured_output.assert_called_once_with(pipeline.Reply, method="json_schema", include_raw=True)
 
             answer["raw"] = AIMessage(content="", response_metadata={"stop_reason": "refusal"})
             with self.assertRaisesMessage(RuntimeError, "Model refused"):
-                agent.ask("system", "user", agent.Reply, max_tokens=10)
+                pipeline.ask("system", "user", pipeline.Reply, max_tokens=10)
 
 
 class BlockTimeAgeTests(SimpleTestCase):
@@ -1045,9 +1046,9 @@ class GmailInsertTests(SimpleTestCase):
     def test_puts_an_unread_email_to_self_in_the_inbox_without_sending(self):
         service = mock.Mock()
         service.users().messages().insert().execute.return_value = {"id": "m9"}
-        with mock.patch("gmail._service", return_value=service), \
-                mock.patch("gmail.my_address", return_value="a@example.com"):
-            import gmail
+        with mock.patch("triage.gmail._service", return_value=service), \
+                mock.patch("triage.gmail.my_address", return_value="a@example.com"):
+            from triage import gmail
             self.assertEqual(gmail.insert_into_inbox("Hello", "Body text"), "m9")
         body = service.users().messages().insert.call_args.kwargs["body"]
         self.assertEqual(body["labelIds"], ["INBOX", "UNREAD"])

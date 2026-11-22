@@ -1,9 +1,9 @@
-"""Minimal email agent: classifies the newest inbox emails by label and urgency,
+"""The triage pipeline: classifies the newest inbox emails by label and urgency,
 runs the required actions for that urgency, drafts a reply when one is needed,
-then lets Claude take more.
+then hands over to the agent (agent.py) to take more.
 
 Usage:
-    python agent.py [N]    # process the newest N inbox emails (default 5)
+    python -m triage.pipeline [N]    # process the newest N inbox emails (default 5)
 """
 
 import sys
@@ -11,17 +11,15 @@ from email.utils import parseaddr
 from pathlib import Path
 from typing import Literal
 
-from langchain.agents import create_agent
-from langchain.agents.middleware import ModelCallLimitMiddleware, wrap_model_call
 from langchain_anthropic import ChatAnthropic
 from pydantic import BaseModel, create_model
 
-import actions
-import gmail
-import labels
-import run_context
+from . import actions
+from . import gmail
+from . import labels
+from . import run_context
+from .agent import MODEL, act
 
-MODEL = "claude-sonnet-5-5"
 DEFAULT_COUNT = 5
 SKILLS_DIR = Path(__file__).parent / "skills"
 
@@ -178,8 +176,6 @@ REQUIRED = {
     "instant": [(actions.block_time, reply_block(urgent=True))],
 }
 
-MAX_STEPS = 5
-
 
 def load_skill(name: str) -> str:
     """The instructions of skills/<name>/SKILL.md, without its frontmatter,
@@ -197,12 +193,6 @@ class Reply(BaseModel):
     body: str
     reply_all: bool
     reply_all_reason: str
-
-
-ACT_PROMPT = """You handle an email that has already been classified, and its required actions are already done.
-Use the tools to take any further actions that would genuinely help the user.
-Don't repeat an action that has already been done. If nothing more is needed, take no action.
-Finish with one line saying what you did."""
 
 
 def run_required(email: Email, result) -> list[str]:
@@ -236,40 +226,6 @@ def auto_draft(email: Email, result, done: list[str]) -> str:
         email.id, reply.body, reply.reply_all, reply.reply_all_reason
     )
     return f"draft_reply(message_id={email.id!r}, reply_all={reply.reply_all}) -> {outcome}"
-
-
-@wrap_model_call
-def one_tool_at_a_time(request, handler):
-    # The Google API clients aren't thread-safe, and LangGraph runs the tool calls
-    # of one turn in parallel, so Claude is told to ask for one tool per turn.
-    settings = {**request.model_settings, "parallel_tool_calls": False}
-    return handler(request.override(model_settings=settings))
-
-
-def act_model() -> ChatAnthropic:
-    return ChatAnthropic(model=MODEL, max_tokens=16000)
-
-
-def act(email: Email, result, done: list[str]) -> None:
-    user = (
-        f"Email:\n{email.model_dump_json(indent=2)}\n\n"
-        f"Classification:\n{result.model_dump_json(indent=2)}\n\n"
-        "Already done:\n" + ("\n".join(done) or "nothing")
-    )
-    graph = create_agent(
-        act_model(),
-        tools=actions.TOOLS,
-        system_prompt=ACT_PROMPT,
-        middleware=[
-            # Ends the loop quietly after MAX_STEPS Claude calls.
-            ModelCallLimitMiddleware(run_limit=MAX_STEPS, exit_behavior="end"),
-            one_tool_at_a_time,
-        ],
-    )
-    final = graph.invoke({"messages": [("human", user)]})["messages"][-1]
-    if final.response_metadata.get("stop_reason") == "refusal":
-        raise RuntimeError("Model refused")
-    print("[agent]", final.text)
 
 
 def run(email: Email, label_names: list[str]):

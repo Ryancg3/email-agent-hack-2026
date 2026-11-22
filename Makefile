@@ -55,10 +55,10 @@ test: .env ## Run the tests
 	$(RUN) python manage.py test accounts
 
 agent: .env ## CLI: process the newest N emails of the token.json account (make agent N=3)
-	$(RUN) python agent.py $(N)
+	$(RUN) python -m triage.pipeline $(N)
 
 cleanup: .env ## CLI: sub-label cleanup for the token.json account, dry run (make cleanup APPLY=1 deletes)
-	$(RUN) python sublabel_cleanup.py $(if $(APPLY),--apply)
+	$(RUN) python -m triage.sublabel_cleanup $(if $(APPLY),--apply)
 
 slots: .env ## CLI: show free calendar slots of the token.json account
-	$(RUN) python gcal.py
+	$(RUN) python -m triage.gcal

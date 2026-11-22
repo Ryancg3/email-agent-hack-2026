@@ -15,8 +15,8 @@ from django.urls import reverse
 from django.utils import timezone
 from google.auth.exceptions import RefreshError
 
-import gmail
-import run_context
+from triage import gmail
+from triage import run_context
 
 from . import runner
 from .models import GoogleConnection, ProcessedEmail

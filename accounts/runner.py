@@ -4,10 +4,10 @@ import anthropic
 from django.utils import timezone
 from google.auth.exceptions import RefreshError
 
-import agent
-import gmail
-import labels
-import run_context
+from triage import pipeline
+from triage import gmail
+from triage import labels
+from triage import run_context
 
 from . import google_connect
 from .models import GoogleConnection, ProcessedEmail, User, user_labels
@@ -75,13 +75,13 @@ def _process_emails(user: User, connection: GoogleConnection, rerun_newest: int)
     for message_id in todo:
         record = ProcessedEmail(user=user, message_id=message_id)
         try:
-            email = agent.Email(**gmail.get_email(message_id))
+            email = pipeline.Email(**gmail.get_email(message_id))
             record.subject = email.subject[:255]
             # Read per email, so a sub-label made for one email is reused by the next.
-            result = agent.run(email, _label_names())
+            result = pipeline.run(email, _label_names())
             record.labels = "\n".join(
                 f"{label}/{sublabel}" if sublabel else label
-                for label, sublabel in agent.pick_labels(result)
+                for label, sublabel in pipeline.pick_labels(result)
             )[:255]
             record.urgency = result.urgency
         except (RefreshError, anthropic.AnthropicError):
