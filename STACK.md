@@ -15,14 +15,14 @@ An email-triage agent with a small web app around it. It reads Gmail, classifies
 | Integrations | Gmail API, Google Calendar API, Google OAuth |
 | Background work | Custom `run_scheduler` management command |
 | Tests | Django `TestCase` + `unittest.mock` |
-| Deployment | Local development only, for now |
+| Deployment | Local, or Docker on Railway or Render (gunicorn + scheduler, SQLite on a persistent disk) |
 
 Versions are the ones installed in `.venv`. `requirements.txt` doesn't pin any.
 
 ## Language and tooling
 
 - Python 3.13, in a `.venv` created by `uv venv`.
-- Dependencies are installed with `uv pip install -r requirements.txt`. The file lists `anthropic`, `langchain`, `langchain-anthropic`, `pydantic`, `google-api-python-client`, `google-auth-oauthlib`, `django`, `cryptography` and `requests`.
+- Dependencies are installed with `uv pip install -r requirements.txt`. The file lists `anthropic`, `langchain`, `langchain-anthropic`, `pydantic`, `google-api-python-client`, `google-auth-oauthlib`, `django`, `cryptography`, `requests`, `gunicorn` and `whitenoise`.
 - Secrets live in `.env` (template: `.env.example`) and are loaded with `uv run --env-file .env`.
 - `Makefile` targets:
   - `make setup`, `make install`, `make migrate`, `make superuser`
@@ -90,5 +90,7 @@ Versions are the ones installed in `.venv`. `requirements.txt` doesn't pin any.
 
 ## Deployment
 
-- Local development only. There is no Dockerfile, CI or production config.
-- `DEBUG` defaults to on and `ALLOWED_HOSTS` is limited to localhost.
+- Locally with `make dev`. `DEBUG` defaults to on and `ALLOWED_HOSTS` is limited to localhost.
+- Hosted with `Dockerfile` and `deploy/start.sh`: one always-on container runs gunicorn and `run_scheduler`, with SQLite on a disk at `/data`. Static files are served by WhiteNoise. `/health` is answered before the host check so platform probes pass. Platform config: `railway.json` (guide `docs/deploy-railway.md`) or `render.yaml` (guide `docs/deploy-render.md`).
+- `APP_HOST` (defaults to `RENDER_EXTERNAL_HOSTNAME` or `RAILWAY_PUBLIC_DOMAIN`) adds the public host to `ALLOWED_HOSTS` and CSRF origins and trusts the proxy's HTTPS header. `SIGNUP_CLOSED=1` blocks new sign-ups.
+- No CI.

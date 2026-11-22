@@ -1,0 +1,31 @@
+# Render Blueprint: one always-on web service that runs the web app and the
+# scheduler (deploy/start.sh), with SQLite on a persistent disk.
+# Guide: docs/deploy-render.md
+services:
+  - type: web
+    name: email-agent
+    runtime: docker
+    plan: starter           # paid plan: needed for a disk, and never sleeps
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeploy: true        # redeploys on every push to the connected branch
+    disk:
+      name: agent-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: DATABASE_PATH
+        value: /data/app.db
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      # Asked for when you create the Blueprint. Copy them from your .env.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: TOKEN_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
