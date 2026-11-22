@@ -7,8 +7,8 @@ at. Top-level labels are never deleted. Deleting a sub-label leaves its emails u
 the parent, which apply_label always applies too.
 
 Usage:
-    python sublabel_cleanup.py           # dry run for the token.json account
-    python sublabel_cleanup.py --apply   # delete for real
+    python -m triage.sublabel_cleanup           # dry run for the token.json account
+    python -m triage.sublabel_cleanup --apply   # delete for real
 """
 
 import json
@@ -21,9 +21,9 @@ import anthropic
 from google.auth.exceptions import RefreshError
 from pydantic import BaseModel
 
-import agent
-import gmail
-import labels
+from . import pipeline
+from . import gmail
+from . import labels
 
 GRACE_DAYS = 14         # never review a sub-label with an email this recent, nor delete one this soon after it ended
 SINGLE_QUIET_DAYS = 14  # one conversation and no new email for this long: a candidate
@@ -133,7 +133,7 @@ def judge(sub: Sublabel, today: date) -> Judgment:
         ],
     }
     user = json.dumps(facts, indent=2, ensure_ascii=False)
-    return agent.ask(SYSTEM_PROMPT, user, Judgment, max_tokens=512)
+    return pipeline.ask(SYSTEM_PROMPT, user, Judgment, max_tokens=512)
 
 
 def settle(judgment: Judgment, today: date) -> tuple[Literal["keep", "delete"], date | None]:

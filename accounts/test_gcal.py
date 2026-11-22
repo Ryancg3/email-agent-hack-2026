@@ -6,8 +6,8 @@ from zoneinfo import ZoneInfo
 
 from django.test import SimpleTestCase
 
-import gcal
-import run_context
+from triage import gcal
+from triage import run_context
 
 TZ = ZoneInfo("Europe/Berlin")
 # A Monday.

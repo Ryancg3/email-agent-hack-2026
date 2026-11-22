@@ -6,7 +6,7 @@ which is also where new users' labels come from (a generic starter set).
 
 from pathlib import Path
 
-import run_context
+from . import run_context
 
 LABELS_FILE = Path(__file__).parent / "labels.md"
 

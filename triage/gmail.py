@@ -7,7 +7,7 @@ from email.message import EmailMessage
 from email.utils import formataddr
 from html.parser import HTMLParser
 
-import run_context
+from . import run_context
 
 MAX_BODY_CHARS = 8000
 # Retries for rate-limit (429, 403 rateLimitExceeded) and server errors. The client

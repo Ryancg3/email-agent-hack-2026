@@ -46,7 +46,7 @@ def current() -> RunContext:
     if ctx := _current.get():
         return ctx
     if _cli is None:
-        import google_auth  # CLI only: may open a browser to log in
+        from . import google_auth  # CLI only: may open a browser to log in
 
         _cli = RunContext(google_auth.credentials())
     return _cli

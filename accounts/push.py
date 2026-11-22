@@ -18,8 +18,8 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-import gmail
-import run_context
+from triage import gmail
+from triage import run_context
 
 from . import google_connect, runner
 from .models import GoogleConnection

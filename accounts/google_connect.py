@@ -8,9 +8,9 @@ from django.conf import settings
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 
-import google_auth
-import gmail
-import run_context
+from triage import google_auth
+from triage import gmail
+from triage import run_context
 
 # Google may return the scopes in another order or add earlier grants; we
 # check the granted scopes ourselves instead of letting oauthlib raise.

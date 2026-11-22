@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib.auth.forms import BaseUserCreationForm
 
-import labels
+from triage import labels
 
 from .models import Label, User
 

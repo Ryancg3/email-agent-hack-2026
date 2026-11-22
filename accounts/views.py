@@ -13,9 +13,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from oauthlib.oauth2 import OAuth2Error
 
-import gmail
-import labels
-import run_context
+from triage import gmail
+from triage import labels
+from triage import run_context
 
 from . import cleanup_runner, google_connect, push, runner
 from .forms import LABELS_MAX, LabelFormSet, SettingsForm, SignupForm

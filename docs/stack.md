@@ -37,11 +37,12 @@ Versions are the ones installed in `.venv`. `requirements.txt` doesn't pin any.
 - Custom email-based user model (`accounts.User`) with session auth. Signup and login forms are in `accounts/forms.py`.
 - Django admin is enabled at `/admin/`.
 - `/health` returns `{"status": "ok"}`.
-- The agent code is flat modules at the repo root:
-  - `agent.py` is the classifier, reply drafter and tool-running agent
-  - `actions.py` holds the extra tools the agent can call
-  - `gmail.py` and `gcal.py` wrap the Google APIs
-  - `google_auth.py`, `labels.py` and `run_context.py` hold auth, label loading and per-user run state
+- The triage code is in the `triage/` package, which doesn't use Django:
+  - `triage/pipeline.py` runs the fixed steps: classify, required actions, reply draft
+  - `triage/agent.py` is the agent step: the tool loop that runs after them
+  - `triage/actions.py` holds the extra tools the agent can call
+  - `triage/gmail.py` and `triage/gcal.py` wrap the Google APIs
+  - `triage/google_auth.py`, `triage/labels.py` and `triage/run_context.py` hold auth, label loading and per-user run state
 - `accounts/runner.py` connects the Django models to the agent.
 
 ## Frontend
@@ -61,18 +62,18 @@ Versions are the ones installed in `.venv`. `requirements.txt` doesn't pin any.
 
 ## AI and agent
 
-- LangChain v1 with `langchain-anthropic` (`ChatAnthropic`), model `claude-sonnet-5-5` (set in `agent.py`). The `anthropic` SDK stays as a dependency: LangChain calls it, and its error classes are what the runners catch.
+- LangChain v1 with `langchain-anthropic` (`ChatAnthropic`), model `claude-sonnet-5-5` (set in `triage/agent.py`). The `anthropic` SDK stays as a dependency: LangChain calls it, and its error classes are what the runners catch.
 - **One-shot calls:** `agent.ask` wraps `with_structured_output(..., method="json_schema")`, Claude's native structured output. Classification, reply drafting and the sub-label cleanup judge all use it.
 - **Classification:** one `agent.ask` call per email. A dynamic pydantic model returns up to 3 labels with sub-labels, an urgency, the minutes needed, and whether a reply is needed.
-- **Label rules:** `labels.md` describes each label to the classifier.
-- **Reply drafting:** a separate call guided by `skills/write-reply/SKILL.md`. Replies are saved as Gmail drafts and never sent.
-- **Extra actions:** `langchain.agents.create_agent` with the functions in `actions.py` wrapped by `langchain_core.tools.tool`. `ModelCallLimitMiddleware` stops the loop after 5 Claude calls, and parallel tool calls are turned off because the Google API clients aren't thread-safe.
+- **Label rules:** `triage/labels.md` describes each label to the classifier.
+- **Reply drafting:** a separate call guided by `triage/skills/write-reply/SKILL.md`. Replies are saved as Gmail drafts and never sent.
+- **Extra actions:** `langchain.agents.create_agent` in `triage/agent.py`, with the functions in `triage/actions.py` wrapped by `langchain_core.tools.tool`. `ModelCallLimitMiddleware` stops the loop after 5 Claude calls, and parallel tool calls are turned off because the Google API clients aren't thread-safe.
 - No vector store or RAG.
 
 ## Integrations
 
-- **Gmail** (`gmail.py`): reads mail, applies labels, creates drafts. Calls retry on quota and server errors.
-- **Google Calendar** (`gcal.py`): finds free slots and blocks time for replies.
+- **Gmail** (`triage/gmail.py`): reads mail, applies labels, creates drafts. Calls retry on quota and server errors.
+- **Google Calendar** (`triage/gcal.py`): finds free slots and blocks time for replies.
 - **OAuth scopes:** `gmail.modify`, `calendar.readonly`, `calendar.events`.
 - **Two OAuth flows:** the CLI uses `InstalledAppFlow` with `credentials.json` and `token.json`. The web app uses a web-application flow in `accounts/google_connect.py`, with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
 - **Token storage:** refresh tokens are encrypted with Fernet (`cryptography`) using `TOKEN_KEY`.

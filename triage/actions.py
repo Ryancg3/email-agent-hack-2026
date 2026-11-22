@@ -10,9 +10,9 @@ from email.utils import getaddresses
 
 from langchain_core.tools import tool
 
-import gcal
-import gmail
-import labels
+from . import gcal
+from . import gmail
+from . import labels
 
 
 # Most of the user's labels one email can hold, sub-labels included.
