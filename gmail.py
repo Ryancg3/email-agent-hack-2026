@@ -4,6 +4,7 @@ import base64
 import logging
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from email.utils import formataddr
 from html.parser import HTMLParser
 
 import run_context
@@ -170,6 +171,22 @@ def create_reply_draft(original: dict, to: str, cc: list[str], body: str) -> str
         userId="me", body={"message": {"raw": raw, "threadId": original["thread_id"]}}
     ).execute(num_retries=RETRIES)
     return draft["id"]
+
+
+def insert_into_inbox(subject: str, body: str) -> str:
+    """Put an email from the account to itself straight into its inbox, unread.
+    Nothing is sent: it never leaves the mailbox. Returns the message id."""
+    note = EmailMessage()
+    address = my_address()
+    note["From"] = formataddr(("Inbox Agent", address))
+    note["To"] = address
+    note["Subject"] = subject
+    note.set_content(body)
+    raw = base64.urlsafe_b64encode(note.as_bytes()).decode()
+    message = _service().users().messages().insert(
+        userId="me", body={"raw": raw, "labelIds": ["INBOX", "UNREAD"]}
+    ).execute(num_retries=RETRIES)
+    return message["id"]
 
 
 def _to_email(msg: dict) -> dict:

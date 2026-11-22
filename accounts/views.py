@@ -247,6 +247,8 @@ def google_callback(request):
             "refresh_token": google_connect.encrypt(creds.refresh_token),
             "status": GoogleConnection.Status.CONNECTED,
             "last_error": "",
+            "authorized_at": timezone.now(),  # Google's 7 days start again
+            "reconnect_reminder_sent_at": None,
             "watch_renew_at": None,  # watch the (possibly different) account right away
         },
     )

@@ -104,7 +104,7 @@
             {% if connection.last_error %}<p class="error-text">{{ connection.last_error }}</p>{% endif %}
             {% if connection.watch_error %}<p class="error-text">{{ connection.watch_error }}</p>{% endif %}
             <div class="actions">
-              {% if connection.status == "reconnect_needed" %}
+              {% if connection.status == "reconnect_needed" or connection.reconnect_reminder_sent_at %}
                 <a class="btn btn-primary btn-sm" href="{% url 'google_connect' %}">Reconnect Google</a>
               {% endif %}
               <form method="post" action="{% url 'google_disconnect' %}">

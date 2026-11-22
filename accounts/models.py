@@ -101,6 +101,10 @@ class GoogleConnection(models.Model):
     # Only emails received after this are processed, so connecting never
     # works through an existing inbox.
     connected_at = models.DateTimeField(default=timezone.now)
+    # When Google last granted access (connect or reconnect). While the Google app is
+    # in Testing mode its refresh token expires 7 days later; see accounts/reminder.py.
+    authorized_at = models.DateTimeField(default=timezone.now)
+    reconnect_reminder_sent_at = models.DateTimeField(null=True, blank=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)
     # When sub-label cleanup last ran; its reviews from that run share this time.

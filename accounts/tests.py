@@ -19,7 +19,7 @@ import labels
 import run_context
 import sublabel_cleanup
 
-from . import cleanup_runner, google_connect, push, runner
+from . import cleanup_runner, google_connect, push, reminder, runner
 from .management.commands import run_scheduler
 from .forms import LABELS_MAX
 from .models import GoogleConnection, Label, ProcessedEmail, SublabelReview, User
@@ -769,3 +769,100 @@ class GmailWatchRenewalTests(TestCase):
             self.client.post(reverse("google_disconnect"))
         stop.assert_called_once()
         self.assertFalse(GoogleConnection.objects.exists())
+
+
+@mock.patch.object(runner.google_connect, "credentials", return_value=None)
+class ReconnectReminderTests(TestCase):
+    def setUp(self):
+        self.user = make_connected_user()
+        self.user.first_name = "Ada"
+        self.user.save()
+        patcher = mock.patch.object(reminder.gmail, "insert_into_inbox", return_value="r1")
+        self.insert = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def authorized(self, ago):
+        GoogleConnection.objects.update(authorized_at=django_timezone.now() - ago)
+
+    def test_not_sent_before_day_six(self, _):
+        self.authorized(timedelta(days=5, hours=23))
+        reminder.send_due()
+        self.insert.assert_not_called()
+
+    def test_sent_once_on_day_six_and_skipped_by_the_agent(self, _):
+        self.authorized(timedelta(days=6))
+        reminder.send_due()
+        reminder.send_due()  # already sent
+        self.insert.assert_called_once()
+        subject, body = self.insert.call_args.args
+        self.assertEqual(subject, reminder.SUBJECT)
+        self.assertIn("Hi Ada,", body)
+        self.assertIn("http://localhost:8000/google/connect/", body)
+        self.assertIsNotNone(GoogleConnection.objects.get().reconnect_reminder_sent_at)
+        self.assertTrue(self.user.processed_emails.filter(message_id="r1").exists())
+
+    def test_not_sent_once_google_already_disconnected(self, _):
+        self.authorized(timedelta(days=8))
+        GoogleConnection.objects.update(status=GoogleConnection.Status.RECONNECT_NEEDED)
+        reminder.send_due()
+        self.insert.assert_not_called()
+
+    def test_expired_access_shows_the_banner_instead(self, _):
+        self.authorized(timedelta(days=6))
+        self.insert.side_effect = RefreshError("invalid_grant")
+        reminder.send_due()
+        connection = GoogleConnection.objects.get()
+        self.assertEqual(connection.status, GoogleConnection.Status.RECONNECT_NEEDED)
+        self.assertIsNone(connection.reconnect_reminder_sent_at)
+
+    def test_other_failures_retry_on_the_next_poll(self, _):
+        self.authorized(timedelta(days=6))
+        self.insert.side_effect = RuntimeError("Gmail is down")
+        reminder.send_due()
+        self.assertIsNone(GoogleConnection.objects.get().reconnect_reminder_sent_at)
+        self.insert.side_effect, self.insert.return_value = None, "r2"
+        reminder.send_due()
+        self.assertIsNotNone(GoogleConnection.objects.get().reconnect_reminder_sent_at)
+
+    def test_link_uses_the_public_host(self, _):
+        with self.settings(APP_HOST="agent.example.com"):
+            self.assertEqual(reminder.reconnect_url(), "https://agent.example.com/google/connect/")
+
+    def test_reconnecting_starts_a_new_seven_days(self, _):
+        self.authorized(timedelta(days=6))
+        reminder.send_due()
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["google_oauth"] = {"state": "s", "code_verifier": "v"}
+        session.save()
+        creds = SimpleNamespace(refresh_token="new-refresh")
+        with mock.patch.object(google_connect, "exchange_code", return_value=creds), \
+                mock.patch.object(google_connect, "has_all_scopes", return_value=True), \
+                mock.patch.object(google_connect, "account_email", return_value="a@example.com"):
+            self.client.get(reverse("google_callback"), {"state": "s", "code": "c"})
+        connection = GoogleConnection.objects.get()
+        self.assertIsNone(connection.reconnect_reminder_sent_at)
+        self.assertAlmostEqual(connection.authorized_at, django_timezone.now(), delta=timedelta(minutes=1))
+
+    def test_dashboard_offers_reconnect_after_the_reminder(self, _):
+        self.client.force_login(self.user)
+        self.assertNotContains(self.client.get(reverse("dashboard")), "Reconnect Google")
+        GoogleConnection.objects.update(reconnect_reminder_sent_at=django_timezone.now())
+        self.assertContains(self.client.get(reverse("dashboard")), "Reconnect Google")
+
+
+class GmailInsertTests(SimpleTestCase):
+    def test_puts_an_unread_email_to_self_in_the_inbox_without_sending(self):
+        service = mock.Mock()
+        service.users().messages().insert().execute.return_value = {"id": "m9"}
+        with mock.patch("gmail._service", return_value=service), \
+                mock.patch("gmail.my_address", return_value="a@example.com"):
+            import gmail
+            self.assertEqual(gmail.insert_into_inbox("Hello", "Body text"), "m9")
+        body = service.users().messages().insert.call_args.kwargs["body"]
+        self.assertEqual(body["labelIds"], ["INBOX", "UNREAD"])
+        raw = base64.urlsafe_b64decode(body["raw"]).decode()
+        self.assertIn("To: a@example.com", raw)
+        self.assertIn("From: Inbox Agent <a@example.com>", raw)
+        self.assertIn("Subject: Hello", raw)
+        service.users().messages().send.assert_not_called()
