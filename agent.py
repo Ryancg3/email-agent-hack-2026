@@ -267,6 +267,10 @@ def act(email: Email, result, done: list[str]) -> None:
         ],
     )
     messages = graph.invoke({"messages": [("human", user)]})["messages"]
+    # Usage is recorded only after the whole loop returns. If an earlier
+    # Claude call succeeds and a later one fails, invoke raises and the
+    # earlier (billed) call is never recorded. Accepted: evals measure cost
+    # for emails the agent handles, not for failed runs.
     for message in messages:
         if isinstance(message, AIMessage):
             cost.record(MODEL, message.usage_metadata)
