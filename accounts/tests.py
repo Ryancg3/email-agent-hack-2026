@@ -438,6 +438,17 @@ class NewDefaultLabelsMigrationTests(TestCase):
         self.assertEqual(user.labels.get(name="Work").sublabels, "one per project or client")
         self.assertFalse(untouched.labels.exists())
 
+    def test_stays_within_the_editor_limit(self):
+        user = make_connected_user()
+        user.labels.all().delete()
+        Label.objects.bulk_create(Label(user=user, position=i, name=f"Mine {chr(65 + i)}") for i in range(LABELS_MAX - 1))
+
+        self.migration.add_new_labels(apps, None)
+
+        self.assertEqual(user.labels.count(), LABELS_MAX)
+        self.assertEqual(user.labels.last().name, "Work")
+        self.assertEqual(self.migration.LABELS_MAX, LABELS_MAX)
+
     def test_matches_labels_md(self):
         defaults = labels.parse(labels.LABELS_FILE.read_text())
         for label in self.migration.NEW_LABELS:

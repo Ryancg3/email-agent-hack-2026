@@ -2,13 +2,17 @@
 
 Users keep every label they already have, edited or not; a new label is skipped when the
 user already has one with the same name (letters only). Users with no labels yet are left
-alone: they get the whole of labels.md the first time their labels load.
+alone: they get the whole of labels.md the first time their labels load. A user never ends
+up with more than LABELS_MAX labels, the Labels tab's limit, so their next save still works.
 
 The labels are copied here rather than read from labels.md, so this migration does the
 same thing whenever it runs, even after labels.md changes again.
 """
 
 from django.db import migrations
+
+# accounts.forms.LABELS_MAX when this migration was written; copied so the migration never changes.
+LABELS_MAX = 30
 
 NEW_LABELS = [
     {
@@ -57,10 +61,10 @@ def add_new_labels(apps, schema_editor):
         rows = list(Label.objects.filter(user=user).values_list("name", "position"))
         have = {key(name) for name, _ in rows}
         position = max(position for _, position in rows) + 1
-        for label in NEW_LABELS:
-            if key(label["name"]) not in have:
-                added.append(Label(user=user, position=position, **label))
-                position += 1
+        room = LABELS_MAX - len(rows)
+        for label in [label for label in NEW_LABELS if key(label["name"]) not in have][:max(room, 0)]:
+            added.append(Label(user=user, position=position, **label))
+            position += 1
     Label.objects.bulk_create(added)
 
 
