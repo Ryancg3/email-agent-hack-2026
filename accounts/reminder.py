@@ -38,24 +38,28 @@ def send_due() -> None:
     ).select_related("user")
 
     for connection in due:
+        # Writes below only apply to the grant read here: if the user reconnects while
+        # Gmail is busy, the new grant keeps its own status and its own day 6 reminder.
+        same_grant = GoogleConnection.objects.filter(pk=connection.pk, authorized_at=connection.authorized_at)
         try:
             with run_context.use(runner.context(connection.user)):
                 message_id = gmail.insert_into_inbox(SUBJECT, body(connection))
         except RefreshError:
             # Google signed the agent out early: the dashboard banner takes over.
-            connection.status = GoogleConnection.Status.RECONNECT_NEEDED
-            connection.last_error = "Google access expired or was revoked. Reconnect Google."
-            connection.save(update_fields=["status", "last_error"])
+            same_grant.update(
+                status=GoogleConnection.Status.RECONNECT_NEEDED,
+                last_error="Google access expired or was revoked. Reconnect Google.",
+            )
             continue
         except Exception as e:
             log.warning("reconnect reminder failed for %s, retrying next poll: %s", connection.google_email, e)
             continue
-        # Mark the reminder handled, so the agent doesn't label it or block time for it.
-        ProcessedEmail.objects.get_or_create(
-            user=connection.user, message_id=message_id, defaults={"subject": SUBJECT}
+        # So the agent never labels it or blocks time for it, not even on "Run now".
+        ProcessedEmail.objects.update_or_create(
+            user=connection.user, message_id=message_id,
+            defaults={"subject": SUBJECT, "status": ProcessedEmail.Status.SKIPPED},
         )
-        connection.reconnect_reminder_sent_at = now
-        connection.save(update_fields=["reconnect_reminder_sent_at"])
+        same_grant.update(reconnect_reminder_sent_at=now)
         print(f"[reminder] put a reconnect reminder in {connection.google_email}'s inbox")
 
 

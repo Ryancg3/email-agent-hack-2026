@@ -247,6 +247,15 @@ class RunnerTests(TestCase):
         self.assertEqual(seen, ["m1", "m2", "m3"])
         self.assertEqual(self.user.processed_emails.get(message_id="m1").subject, "subject m1")
 
+    def test_run_now_skips_the_agents_own_reminder(self, _):
+        ProcessedEmail.objects.create(user=self.user, message_id="m2", status=ProcessedEmail.Status.SKIPPED)
+        seen = []
+        result = SimpleNamespace(labels=[], urgency="not_urgent")
+        with mock.patch.object(runner.agent, "run", lambda email, labels: seen.append(email.id) or result):
+            runner.run_user(self.user, rerun_newest=3)
+        self.assertEqual(seen, ["m1", "m3"])
+        self.assertEqual(self.user.processed_emails.get(message_id="m2").status, ProcessedEmail.Status.SKIPPED)
+
     def test_reply_skill_uses_the_users_name(self, _):
         self.user.first_name, self.user.last_name = "Ada", "Lovelace"
         skills = []
@@ -828,7 +837,29 @@ class ReconnectReminderTests(TestCase):
         self.assertIn("Hi Ada,", body)
         self.assertIn("http://localhost:8000/google/connect/", body)
         self.assertIsNotNone(GoogleConnection.objects.get().reconnect_reminder_sent_at)
-        self.assertTrue(self.user.processed_emails.filter(message_id="r1").exists())
+        self.assertEqual(self.user.processed_emails.get(message_id="r1").status, ProcessedEmail.Status.SKIPPED)
+
+    def test_reconnecting_during_the_reminder_keeps_the_new_grants_reminder(self, _):
+        self.authorized(timedelta(days=6))
+
+        def reconnect_meanwhile(subject, body):
+            GoogleConnection.objects.update(authorized_at=django_timezone.now(), reconnect_reminder_sent_at=None)
+            return "r1"
+
+        self.insert.side_effect = reconnect_meanwhile
+        reminder.send_due()
+        self.assertIsNone(GoogleConnection.objects.get().reconnect_reminder_sent_at)
+
+    def test_reconnecting_during_a_failed_reminder_stays_connected(self, _):
+        self.authorized(timedelta(days=6))
+
+        def reconnect_then_fail(subject, body):
+            GoogleConnection.objects.update(authorized_at=django_timezone.now())
+            raise RefreshError("invalid_grant")
+
+        self.insert.side_effect = reconnect_then_fail
+        reminder.send_due()
+        self.assertEqual(GoogleConnection.objects.get().status, GoogleConnection.Status.CONNECTED)
 
     def test_not_sent_once_google_already_disconnected(self, _):
         self.authorized(timedelta(days=8))

@@ -122,6 +122,8 @@ class ProcessedEmail(models.Model):
     class Status(models.TextChoices):
         OK = "ok"
         ERROR = "error"
+        # The agent's own reminder emails: never processed, not even by "Run now".
+        SKIPPED = "skipped"
 
     class Urgency(models.TextChoices):
         NOT_URGENT = "not_urgent", "Not urgent"

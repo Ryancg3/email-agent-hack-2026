@@ -62,7 +62,11 @@ def _process_emails(user: User, connection: GoogleConnection, rerun_newest: int)
         print(f"[labels] {user.email}: {warning}")
 
     if rerun_newest:
-        todo = list(reversed(gmail.list_inbox_ids(rerun_newest)))  # oldest first
+        ids = gmail.list_inbox_ids(rerun_newest)
+        skipped = set(user.processed_emails.filter(
+            message_id__in=ids, status=ProcessedEmail.Status.SKIPPED
+        ).values_list("message_id", flat=True))
+        todo = [message_id for message_id in reversed(ids) if message_id not in skipped]  # oldest first
     else:
         ids = gmail.list_inbox_ids(LOOKBACK, after=connection.connected_at)
         done = set(user.processed_emails.filter(message_id__in=ids).values_list("message_id", flat=True))

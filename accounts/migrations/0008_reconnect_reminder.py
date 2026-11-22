@@ -25,5 +25,12 @@ class Migration(migrations.Migration):
             name="reconnect_reminder_sent_at",
             field=models.DateTimeField(blank=True, null=True),
         ),
+        migrations.AlterField(
+            model_name="processedemail",
+            name="status",
+            field=models.CharField(
+                choices=[("ok", "Ok"), ("error", "Error"), ("skipped", "Skipped")], default="ok", max_length=10
+            ),
+        ),
         migrations.RunPython(authorized_at_from_connected_at, migrations.RunPython.noop),
     ]
