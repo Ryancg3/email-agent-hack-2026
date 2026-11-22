@@ -2,7 +2,7 @@ from datetime import datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from google.auth.exceptions import RefreshError
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
@@ -34,6 +34,11 @@ class AccountViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
 
+    def test_health_answers_any_host(self):
+        response = self.client.get("/health", HTTP_HOST="10.0.0.5:10000")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get("/", HTTP_HOST="10.0.0.5:10000").status_code, 400)
+
     def test_landing_page_adapts_to_login_state(self):
         self.assertContains(self.client.get(reverse("home")), reverse("signup"))
         self.client.force_login(User.objects.create_user("a@example.com", "a-long-password"))
@@ -60,6 +65,19 @@ class AccountViewsTests(TestCase):
         data = {"email": "new@example.com", "password1": "a-long-password", "password2": "a-long-password"}
         response = self.client.post(reverse("signup"), data)
         self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(email="new@example.com").exists())
+
+    @override_settings(SIGNUP_CLOSED=True)
+    def test_signup_closed_creates_no_account(self):
+        data = {
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "email": "new@example.com",
+            "password1": "a-long-password",
+            "password2": "a-long-password",
+        }
+        response = self.client.post(reverse("signup"), data)
+        self.assertRedirects(response, reverse("login"))
         self.assertFalse(User.objects.filter(email="new@example.com").exists())
 
     def test_login_is_case_insensitive(self):

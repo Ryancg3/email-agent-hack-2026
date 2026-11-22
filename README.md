@@ -48,3 +48,9 @@ make test       # run the tests
 ```
 
 Run `make help` to see every command.
+
+## Hosting
+
+To keep the agent running when your laptop is off, deploy the Docker image to
+Railway (about $5 a month, [docs/deploy-railway.md](docs/deploy-railway.md)) or Render
+(about $7.25 a month, [docs/deploy-render.md](docs/deploy-render.md)).
