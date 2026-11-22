@@ -37,8 +37,7 @@ class ReplySlotTests(SimpleTestCase):
         def listed(start, end):
             # Like Google: events that overlap the range.
             return [e for e in events
-                    if datetime.fromisoformat(e["end"]["dateTime"]) > start
-                    and datetime.fromisoformat(e["start"]["dateTime"]) < end]
+                    if gcal._any_slot(e)[1] > start and gcal._any_slot(e)[0] < end]
 
         ctx = run_context.RunContext(creds=None, work_start=time(9), work_end=time(18),
                                      urgent_after_hours=after_hours)
@@ -125,4 +124,20 @@ class ReplySlotTests(SimpleTestCase):
         declined = event(at(10), at(11), attendees=[{"self": True, "responseStatus": "declined"}])
         free = event(at(10), at(11), transparency="transparent")
         slot = self.place(at(10), [], urgent=True, extra_events=[declined, free])
+        self.assertEqual(slot[0], at(10))
+
+    def test_busy_all_day_event_blocks_the_day(self):
+        conference = {"summary": "Conference", "start": {"date": "2026-11-23"}, "end": {"date": "2026-11-24"}}
+        slot = self.place(at(10), [], urgent=True, extra_events=[conference])
+        self.assertEqual(slot[0], datetime(2026, 11, 24, 9, tzinfo=TZ))
+
+    def test_free_all_day_event_does_not(self):
+        holiday = {"summary": "Holiday", "start": {"date": "2026-11-23"}, "end": {"date": "2026-11-24"},
+                   "transparency": "transparent"}
+        slot = self.place(at(10), [], urgent=True, extra_events=[holiday])
+        self.assertEqual(slot[0], at(10))
+
+    def test_free_email_time_is_not_blocked(self):
+        free = event(at(10), at(12), "Email time", transparency="transparent")
+        slot = self.place(at(10), [], urgent=True, extra_events=[free])
         self.assertEqual(slot[0], at(10))

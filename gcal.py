@@ -5,7 +5,7 @@ Usage:
 """
 
 import sys
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import run_context
@@ -70,33 +70,42 @@ def _is_email_time(event: dict) -> bool:
     )
 
 
-def _is_meeting(event: dict) -> bool:
-    """A timed event that blocks the user: not email time, not marked free,
-    not declined."""
+def _blocks_time(event: dict) -> bool:
+    """Whether the event makes the user busy: not marked free, not declined."""
     return not (
-        _is_email_time(event)
-        or event.get("transparency") == "transparent"
+        event.get("transparency") == "transparent"
         or any(a.get("self") and a.get("responseStatus") == "declined"
                for a in event.get("attendees", []))
     )
 
 
 def _events(start: datetime, end: datetime) -> list[dict]:
-    """Timed events in the range."""
-    events = _service().events().list(
+    """Events in the range, all-day ones included."""
+    return _service().events().list(
         calendarId="primary", timeMin=start.isoformat(), timeMax=end.isoformat(),
         singleEvents=True, orderBy="startTime", maxResults=2500,
     ).execute()["items"]
-    return [e for e in events if "dateTime" in e["start"]]
+
+
+def _any_slot(event: dict) -> Slot:
+    """An event's start and end; an all-day event runs from midnight to
+    midnight in the calendar's time zone."""
+    if "dateTime" in event["start"]:
+        return event_slot(event)
+    tz = _timezone()
+    return tuple(datetime.combine(date.fromisoformat(event[edge]["date"]), time.min, tz)
+                 for edge in ("start", "end"))
 
 
 def _calendar(start: datetime, end: datetime) -> tuple[list[Slot], list[Slot]]:
-    """The meetings and the email time in the range. Starts a little earlier,
-    so a meeting that just ended still keeps its AFTER_MEETING buffer."""
-    events = _events(start - AFTER_MEETING - timedelta(minutes=5), end)
-    meetings = [event_slot(e) for e in events if _is_meeting(e)]
-    email_time = [event_slot(e) for e in events if _is_email_time(e)]
-    return meetings, email_time
+    """The meetings and the email time in the range, both only events that
+    make the user busy. Meetings include busy all-day events, like a vacation.
+    Starts a little earlier, so a meeting that just ended still keeps its
+    AFTER_MEETING buffer."""
+    events = [e for e in _events(start - AFTER_MEETING - timedelta(minutes=5), end) if _blocks_time(e)]
+    timed_email = [e for e in events if "dateTime" in e["start"] and _is_email_time(e)]
+    meetings = [_any_slot(e) for e in events if e not in timed_email]
+    return meetings, [event_slot(e) for e in timed_email]
 
 
 def _around_meetings(meetings: list[Slot], email_time: list[Slot]) -> list[Slot]:
