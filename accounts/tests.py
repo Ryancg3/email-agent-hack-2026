@@ -163,6 +163,35 @@ class DashboardProblemsBannerTests(TestCase):
         self.assertNotContains(response, "Too old to count")
 
 
+class DashboardStatusOverviewTests(TestCase):
+    def setUp(self):
+        self.user = make_connected_user()
+        self.client.force_login(self.user)
+
+    def test_shows_agent_google_run_count_and_delivery_status(self):
+        self.user.google.last_run_at = django_timezone.now() - timedelta(minutes=10)
+        self.user.google.save(update_fields=["last_run_at"])
+        today_start = django_timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        ProcessedEmail.objects.create(user=self.user, message_id="ok-today")
+        ProcessedEmail.objects.create(
+            user=self.user, message_id="failed-today", status=ProcessedEmail.Status.ERROR
+        )
+        old = ProcessedEmail.objects.create(user=self.user, message_id="ok-yesterday")
+        ProcessedEmail.objects.filter(pk=old.pk).update(
+            processed_at=today_start - timedelta(microseconds=1)
+        )
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Agent status")
+        self.assertContains(response, "Active")
+        self.assertContains(response, "Connected")
+        self.assertContains(response, "Last run")
+        self.assertContains(response, "Handled today (UTC)")
+        self.assertContains(response, '<span class="status-value">1</span>', html=True)
+        self.assertContains(response, "Poll · every 5 minutes")
+
+
 @mock.patch.object(runner.google_connect, "credentials", return_value=None)
 class RunnerTests(TestCase):
     def setUp(self):
@@ -658,9 +687,9 @@ class GmailPushWebhookTests(TestCase):
 
     def test_dashboard_says_how_new_emails_are_handled(self):
         self.client.force_login(self.user)
-        self.assertContains(self.client.get(reverse("dashboard")), "Checked every 5 minutes")
+        self.assertContains(self.client.get(reverse("dashboard")), "Poll · every 5 minutes")
         GoogleConnection.objects.update(watch_expires_at=django_timezone.now() + timedelta(days=7))
-        self.assertContains(self.client.get(reverse("dashboard")), "Handled within seconds")
+        self.assertContains(self.client.get(reverse("dashboard")), "Push · within seconds")
 
 
 @override_settings(**PUSH_SETTINGS)

@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, time, timedelta
 
 from django.conf import settings
 from django.contrib import messages
@@ -69,12 +69,21 @@ def dashboard(request):
 
 def _render_dashboard(request, form):
     connection = GoogleConnection.objects.filter(user=request.user).first()
+    # Users do not have a saved time zone yet, so use an explicit UTC day and
+    # label it as UTC in the dashboard rather than implying a local boundary.
+    today_start = datetime.combine(timezone.now().date(), time.min, tzinfo=UTC)
+    handled_today = request.user.processed_emails.filter(
+        status=ProcessedEmail.Status.OK,
+        processed_at__gte=today_start,
+        processed_at__lt=today_start + timedelta(days=1),
+    ).count()
     failed = request.user.processed_emails.filter(
         status=ProcessedEmail.Status.ERROR, processed_at__gte=timezone.now() - timedelta(hours=24)
     )
     return render(request, "accounts/dashboard.html", {
         "connection": connection,
         "form": form,
+        "handled_today": handled_today,
         "failed_count": failed.count(),
         "latest_failure": failed.first(),
         "cleanup": cleanup_runner.last_result(request.user) if connection else None,

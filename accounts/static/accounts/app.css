@@ -201,10 +201,11 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .card-header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  min-height: 56px; padding: 0 24px; border-bottom: 1px solid var(--border);
+  min-height: 64px; padding: 12px 24px; border-bottom: 1px solid var(--border);
 }
 .card-header form { margin: 0; }
 .card-title { margin: 0; font-size: 16px; font-weight: 600; }
+.card-subtitle { margin: 2px 0 0; font-size: 12px; color: var(--text-subtle); }
 .card-body { padding: 24px; }
 
 /* Forms: Ant Form and Input */
@@ -231,8 +232,11 @@ input::placeholder, textarea::placeholder { color: var(--text-disabled); }
 .field-row .field { margin-bottom: 8px; }
 
 /* Labels tab: an Ant Table with inline inputs */
-.label-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.label-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
 .label-note form { margin: 0; }
+.alert.label-note { justify-content: flex-start; }
+.labels-card { overflow: hidden; }
+.labels-form { margin: 0; }
 .label-errors { margin: 16px 24px 0; }
 .label-row {
   display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr) minmax(0, 2fr) 84px;
@@ -325,6 +329,16 @@ input::placeholder, textarea::placeholder { color: var(--text-disabled); }
 .status-on .dot { background: var(--success); box-shadow: 0 0 0 3px var(--ring-on); }
 .status-off .dot { background: var(--border-strong); }
 .status-warn .dot { background: var(--warning); box-shadow: 0 0 0 3px var(--ring-warn); }
+.status-inline { display: inline-flex; align-items: center; gap: 8px; }
+
+/* Dashboard status overview: compact now, with a grid that can grow for future metrics. */
+.status-overview { margin-bottom: 24px; overflow: hidden; }
+.status-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.status-item { min-width: 0; padding: 16px 20px; border-left: 1px solid var(--border); }
+.status-item:first-child { border-left: 0; }
+.status-label { display: block; margin-bottom: 4px; font-size: 12px; color: var(--text-subtle); }
+.status-value { display: block; color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+.status-value.status-inline { display: flex; }
 
 /* Auth pages */
 .auth { display: grid; place-items: center; min-height: calc(100vh - 65px); padding: 48px 24px; }
@@ -444,6 +458,11 @@ input::placeholder, textarea::placeholder { color: var(--text-disabled); }
 
 @media (max-width: 860px) {
   .layout, .grid-3, .grid-2, .checklist { grid-template-columns: 1fr; }
+  .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .status-item { border-top: 1px solid var(--border); }
+  .status-item:nth-child(-n + 2) { border-top: 0; }
+  .status-item:nth-child(odd) { border-left: 0; }
+  .status-item:last-child { grid-column: span 2; }
   .preview-body { grid-template-columns: 1fr; }
   .preview-calendar { display: none; }
   .section { padding: 72px 0; }
@@ -454,4 +473,16 @@ input::placeholder, textarea::placeholder { color: var(--text-disabled); }
   .nav .brand-name { display: none; }
   .activity .badges .badge:first-child { display: none; }
   .auth-card { padding: 24px; }
+  .page { padding: 24px 16px 64px; }
+  .page-header { align-items: flex-start; margin-bottom: 20px; }
+  .card-header { align-items: flex-start; padding: 12px 16px; }
+  .card-body { padding: 20px 16px; }
+  .status-item { padding: 14px 16px; }
+  .label-footer { align-items: stretch; padding: 16px; }
+  .label-footer .btn { width: 100%; }
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
