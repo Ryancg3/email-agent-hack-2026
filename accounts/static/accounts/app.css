@@ -46,10 +46,9 @@
   --info: #1677ff;
   --info-soft: #e6f4ff;
   --info-border: #91caff;
-  /* Tag presets: red, orange, blue */
+  /* Tag presets: red, orange */
   --tag-red: #cf1322;    --tag-red-bg: #fff1f0;    --tag-red-border: #ffa39e;
   --tag-orange: #d46b08; --tag-orange-bg: #fff7e6; --tag-orange-border: #ffd591;
-  --tag-blue: #0958d9;   --tag-blue-bg: #e6f4ff;   --tag-blue-border: #91caff;
   --ring-on: rgb(82 196 26 / 0.2);
   --ring-warn: rgb(250 173 20 / 0.2);
   --switch-off: rgb(0 0 0 / 0.25);
@@ -108,7 +107,6 @@
   --info-border: #15325b;
   --tag-red: #e84749;    --tag-red-bg: #2a1215;    --tag-red-border: #58181c;
   --tag-orange: #e89a3c; --tag-orange-bg: #2b1d11; --tag-orange-border: #593815;
-  --tag-blue: #3c89e8;   --tag-blue-bg: #111a2c;   --tag-blue-border: #15325b;
   --ring-on: rgb(73 170 25 / 0.25);
   --ring-warn: rgb(216 150 20 / 0.25);
   --switch-off: rgb(255 255 255 / 0.3);
@@ -315,7 +313,6 @@ input::placeholder, textarea::placeholder { color: var(--text-disabled); }
 .badge .dot { display: none; }
 .badge-instant, .badge-error { color: var(--tag-red); background: var(--tag-red-bg); border-color: var(--tag-red-border); }
 .badge-schedule_time { color: var(--tag-orange); background: var(--tag-orange-bg); border-color: var(--tag-orange-border); }
-.badge-for_summary { color: var(--tag-blue); background: var(--tag-blue-bg); border-color: var(--tag-blue-border); }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
 /* Status: Ant Badge status dot */
