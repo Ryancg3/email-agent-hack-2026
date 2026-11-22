@@ -26,7 +26,9 @@ as drafts, never sent.
 5. **Extra actions** (Claude). A tool loop of at most 5 steps that can call the
    tools in [actions.py](actions.py) for anything beyond the required minimum.
 
-See [agent_outline.md](agent_outline.md) for the tools, limits and guardrails.
+See [agent_outline.md](agent_outline.md) for the tools, limits and guardrails, and
+[docs/system-design.md](docs/system-design.md) for the infrastructure, its trade-offs
+and where it breaks first.
 
 ## Setup
 
