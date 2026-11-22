@@ -11,7 +11,9 @@ from email.utils import parseaddr
 from pathlib import Path
 from typing import Literal
 
-import anthropic
+from langchain.agents import create_agent
+from langchain.agents.middleware import ModelCallLimitMiddleware, wrap_model_call
+from langchain_anthropic import ChatAnthropic
 from pydantic import BaseModel, create_model
 
 import actions
@@ -103,25 +105,22 @@ def label_menu(label_names: list[str]) -> tuple[list[str], str]:
     return top, "\n".join(lines)
 
 
+def ask(system: str, user: str, schema: type[BaseModel], max_tokens: int) -> BaseModel:
+    """One Claude call that returns `schema`, using Claude's native structured output."""
+    llm = ChatAnthropic(model=MODEL, max_tokens=max_tokens)
+    structured = llm.with_structured_output(schema, method="json_schema", include_raw=True)
+    out = structured.invoke([("system", system), ("human", user)])
+    if out["raw"].response_metadata.get("stop_reason") == "refusal":
+        raise RuntimeError("Model refused")
+    if out["parsing_error"]:
+        raise out["parsing_error"]
+    return out["parsed"]
+
+
 def classify(email: Email, label_names: list[str]) -> BaseModel:
     top, menu = label_menu(label_names)
-    request = {
-        "model": MODEL,
-        "max_tokens": 1024,
-        "system": SYSTEM_PROMPT,
-        "messages": [
-            {
-                "role": "user",
-                "content": f"Allowed labels:\n{menu}\n\nEmail:\n"
-                + email.model_dump_json(indent=2),
-            }
-        ],
-    }
-    client = anthropic.Anthropic()
-    response = client.messages.parse(**request, output_format=result_model(top))
-    if response.stop_reason == "refusal":
-        raise RuntimeError(f"Model refused: {response.stop_details}")
-    return response.parsed_output
+    user = f"Allowed labels:\n{menu}\n\nEmail:\n" + email.model_dump_json(indent=2)
+    return ask(SYSTEM_PROMPT, user, result_model(top), max_tokens=1024)
 
 
 def pick_labels(result) -> list[tuple[str, str | None]]:
@@ -221,24 +220,12 @@ def run_required(email: Email, result) -> list[str]:
 
 
 def write_reply(email: Email, result, done: list[str]) -> Reply:
-    request = {
-        "model": MODEL,
-        "max_tokens": 4096,
-        "system": load_skill("write-reply"),
-        "messages": [
-            {
-                "role": "user",
-                "content": f"Email:\n{email.model_dump_json(indent=2)}\n\n"
-                f"Classification:\n{result.model_dump_json(indent=2)}\n\n"
-                "Already done:\n" + ("\n".join(done) or "nothing"),
-            }
-        ],
-    }
-    client = anthropic.Anthropic()
-    response = client.messages.parse(**request, output_format=Reply)
-    if response.stop_reason == "refusal":
-        raise RuntimeError(f"Model refused: {response.stop_details}")
-    return response.parsed_output
+    user = (
+        f"Email:\n{email.model_dump_json(indent=2)}\n\n"
+        f"Classification:\n{result.model_dump_json(indent=2)}\n\n"
+        "Already done:\n" + ("\n".join(done) or "nothing")
+    )
+    return ask(load_skill("write-reply"), user, Reply, max_tokens=4096)
 
 
 def auto_draft(email: Email, result, done: list[str]) -> str:
@@ -252,30 +239,38 @@ def auto_draft(email: Email, result, done: list[str]) -> str:
     return f"draft_reply(message_id={email.id!r}, reply_all={reply.reply_all}) -> {outcome}"
 
 
+@wrap_model_call
+def one_tool_at_a_time(request, handler):
+    # The Google API clients aren't thread-safe, and LangGraph runs the tool calls
+    # of one turn in parallel, so Claude is told to ask for one tool per turn.
+    settings = {**request.model_settings, "parallel_tool_calls": False}
+    return handler(request.override(model_settings=settings))
+
+
+def act_model() -> ChatAnthropic:
+    return ChatAnthropic(model=MODEL, max_tokens=16000)
+
+
 def act(email: Email, result, done: list[str]) -> None:
-    request = {
-        "model": MODEL,
-        "max_tokens": 16000,
-        "system": ACT_PROMPT,
-        "messages": [
-            {
-                "role": "user",
-                "content": f"Email:\n{email.model_dump_json(indent=2)}\n\n"
-                f"Classification:\n{result.model_dump_json(indent=2)}\n\n"
-                "Already done:\n" + ("\n".join(done) or "nothing"),
-            }
-        ],
-    }
-    client = anthropic.Anthropic()
-    runner = client.beta.messages.tool_runner(
-        **request, tools=actions.TOOLS, max_iterations=MAX_STEPS
+    user = (
+        f"Email:\n{email.model_dump_json(indent=2)}\n\n"
+        f"Classification:\n{result.model_dump_json(indent=2)}\n\n"
+        "Already done:\n" + ("\n".join(done) or "nothing")
     )
-    final = None
-    for message in runner:
-        final = message
-    if final.stop_reason == "refusal":
-        raise RuntimeError(f"Model refused: {final.stop_details}")
-    print("[agent]", "".join(b.text for b in final.content if b.type == "text"))
+    graph = create_agent(
+        act_model(),
+        tools=actions.TOOLS,
+        system_prompt=ACT_PROMPT,
+        middleware=[
+            # Ends the loop quietly after MAX_STEPS Claude calls.
+            ModelCallLimitMiddleware(run_limit=MAX_STEPS, exit_behavior="end"),
+            one_tool_at_a_time,
+        ],
+    )
+    final = graph.invoke({"messages": [("human", user)]})["messages"][-1]
+    if final.response_metadata.get("stop_reason") == "refusal":
+        raise RuntimeError("Model refused")
+    print("[agent]", final.text)
 
 
 def run(email: Email, label_names: list[str]):

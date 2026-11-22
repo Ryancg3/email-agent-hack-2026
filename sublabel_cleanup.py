@@ -21,10 +21,10 @@ import anthropic
 from google.auth.exceptions import RefreshError
 from pydantic import BaseModel
 
+import agent
 import gmail
 import labels
 
-MODEL = "claude-sonnet-5-5"
 GRACE_DAYS = 14         # never review a sub-label with an email this recent, nor delete one this soon after it ended
 SINGLE_QUIET_DAYS = 14  # one conversation and no new email for this long: a candidate
 QUIET_DAYS = 45         # no new email for this long: a candidate
@@ -132,16 +132,8 @@ def judge(sub: Sublabel, today: date) -> Judgment:
             for e in recent
         ],
     }
-    response = anthropic.Anthropic().messages.parse(
-        model=MODEL,
-        max_tokens=512,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": json.dumps(facts, indent=2, ensure_ascii=False)}],
-        output_format=Judgment,
-    )
-    if response.stop_reason == "refusal":
-        raise RuntimeError(f"Model refused: {response.stop_details}")
-    return response.parsed_output
+    user = json.dumps(facts, indent=2, ensure_ascii=False)
+    return agent.ask(SYSTEM_PROMPT, user, Judgment, max_tokens=512)
 
 
 def settle(judgment: Judgment, today: date) -> tuple[Literal["keep", "delete"], date | None]:
