@@ -137,7 +137,8 @@ flowchart TD
 "Email time" means the agent's earlier reply blocks and the user's own events with
 "reply", "email" or "inbox" in the title. Grouping replies next to them keeps email
 work in batches; urgent replies skip the grouping and take the first free time. If
-nothing fits in the next 5 days, the block is skipped with an error in the log.
+nothing fits in the next 5 days, the block is skipped and a line is printed to the
+scheduler log. The email is still saved as `ok`, so the dashboard doesn't show it.
 
 Typical time per email: 10 to 30 seconds of Claude work (two or three calls, plus
 the tool loop).
@@ -233,9 +234,14 @@ sequenceDiagram
     W->>G: exchange code for tokens
     W->>W: check all scopes granted and a refresh token returned
     W->>D: save GoogleConnection (refresh token encrypted with TOKEN_KEY)
-    Note over D: connected_at = now: older emails are never processed
+    Note over D: first connect, or a different account: connected_at = now, so older emails are never processed
     Note over W,D: watch_renew_at = empty, so the scheduler starts the Gmail watch on its next tick
 ```
+
+Reconnecting the **same** account keeps the old `connected_at`, so the first run
+afterwards catches up on emails that arrived while it was disconnected (the newest 100
+inbox ids, 10 per run). Connecting a **different** account resets it, so that account's
+existing inbox is left alone.
 
 The app only stores the **refresh token**, encrypted with Fernet. Each run builds fresh
 credentials from it. If Google refuses the token (expired or revoked), the run catches

@@ -125,6 +125,35 @@ class AccountViewsTests(TestCase):
         self.assertIsNotNone(user.run_requested_at)
 
 
+@override_settings(GOOGLE_CLIENT_ID="id", GOOGLE_CLIENT_SECRET="secret")
+class GoogleCallbackTests(TestCase):
+    def setUp(self):
+        self.user = make_connected_user("a@example.com")
+        self.old_cutoff = django_timezone.now() - timedelta(days=30)
+        GoogleConnection.objects.filter(user=self.user).update(connected_at=self.old_cutoff)
+        self.client.force_login(self.user)
+
+    def reconnect(self, address):
+        session = self.client.session
+        session["google_oauth"] = {"state": "s", "code_verifier": "v"}
+        session.save()
+        creds = SimpleNamespace(refresh_token="new-refresh")
+        with mock.patch.object(google_connect, "exchange_code", return_value=creds), \
+                mock.patch.object(google_connect, "has_all_scopes", return_value=True), \
+                mock.patch.object(google_connect, "account_email", return_value=address):
+            self.client.get(reverse("google_callback"), {"state": "s", "code": "c"})
+        return GoogleConnection.objects.get(user=self.user)
+
+    def test_same_account_keeps_cutoff_to_catch_up(self):
+        connection = self.reconnect("A@example.com")
+        self.assertEqual(connection.connected_at, self.old_cutoff)
+
+    def test_different_account_starts_cutoff_now(self):
+        connection = self.reconnect("b@example.com")
+        self.assertEqual(connection.google_email, "b@example.com")
+        self.assertGreater(connection.connected_at, self.old_cutoff + timedelta(days=29))
+
+
 @mock.patch.object(runner.google_connect, "credentials", return_value=None)
 class RunnerTests(TestCase):
     def setUp(self):

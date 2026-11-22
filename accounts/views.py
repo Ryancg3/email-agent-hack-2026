@@ -234,16 +234,21 @@ def google_callback(request):
         messages.error(request, "Google didn't return a long-lived token. Please try again.")
         return redirect("dashboard")
 
-    connection, _ = GoogleConnection.objects.update_or_create(
-        user=request.user,
-        defaults={
-            "google_email": google_connect.account_email(creds),
-            "refresh_token": google_connect.encrypt(creds.refresh_token),
-            "status": GoogleConnection.Status.CONNECTED,
-            "last_error": "",
-            "watch_renew_at": None,  # watch the (possibly different) account right away
-        },
-    )
+    google_email = google_connect.account_email(creds)
+    defaults = {
+        "google_email": google_email,
+        "refresh_token": google_connect.encrypt(creds.refresh_token),
+        "status": GoogleConnection.Status.CONNECTED,
+        "last_error": "",
+        "watch_renew_at": None,  # watch the (possibly different) account right away
+    }
+    previous = GoogleConnection.objects.filter(user=request.user).first()
+    if previous and previous.google_email.lower() != google_email.lower():
+        # A different account: start its cutoff now, so its existing inbox is left alone.
+        # Reconnecting the same account keeps the cutoff, so emails that arrived while
+        # it was disconnected are still processed.
+        defaults["connected_at"] = timezone.now()
+    connection, _ = GoogleConnection.objects.update_or_create(user=request.user, defaults=defaults)
     messages.success(request, f"Connected {connection.google_email}.")
     return redirect("dashboard")
 
