@@ -145,10 +145,6 @@ class ProcessedEmail(models.Model):
             models.UniqueConstraint(fields=["user", "message_id"], name="unique_processed_email"),
         ]
 
-    @property
-    def label_list(self) -> list[str]:
-        return [label for label in self.labels.splitlines() if label]
-
 
 class SublabelReview(models.Model):
     """One sub-label looked at by sub-label cleanup, kept or deleted."""
