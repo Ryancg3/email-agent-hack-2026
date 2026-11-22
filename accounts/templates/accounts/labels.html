@@ -26,6 +26,9 @@
       <div>
         <h2 class="card-title">Label rules</h2>
         <p class="card-subtitle">Describe what belongs in each label so the agent can file mail consistently.</p>
+        <p class="card-subtitle label-count">
+          {{ label_count }} of {{ labels_max }} labels{% if label_count >= labels_max %}. Delete one to add another.{% endif %}
+        </p>
       </div>
       <form method="post" action="{% url 'reset_labels' %}"
             onsubmit="return confirm('Replace all your labels with the defaults?')">

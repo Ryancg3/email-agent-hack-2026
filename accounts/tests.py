@@ -395,7 +395,7 @@ class LabelsTabTests(TestCase):
         Label.objects.create(user=self.user, name="Mine")
         names = [f"Label {chr(65 + i // 26)}{chr(65 + i % 26)}" for i in range(LABELS_MAX + 1)]
         response = self.client.post(reverse("labels"), formset_data([{"name": name} for name in names]))
-        self.assertContains(response, f"Please submit at most {LABELS_MAX} forms.")
+        self.assertContains(response, f"You can have at most {LABELS_MAX} labels. Delete one to add another.")
         self.assertEqual(self.rows(), [("", "Mine")])
 
     def test_add_missing_gmail_labels(self, _):
@@ -403,6 +403,21 @@ class LabelsTabTests(TestCase):
         Label.objects.create(user=self.user, name="Travel")
         self.client.post(reverse("add_missing_labels"))
         self.assertEqual(self.rows(), [("", "Travel"), ("", "Hobbies")])
+
+    def test_add_missing_stays_within_the_limit(self, _):
+        self.list_labels.return_value = [{"name": "Hobbies"}, {"name": "Sport"}]
+        self.user.labels.all().delete()
+        Label.objects.bulk_create(Label(user=self.user, position=i, name=f"Mine {chr(65 + i)}") for i in range(LABELS_MAX - 1))
+        response = self.client.post(reverse("add_missing_labels"), follow=True)
+        self.assertContains(response, f"Added 1 label. Describe them below. 1 more didn&#x27;t fit: you can have at most {LABELS_MAX} labels.")
+        self.assertEqual(self.user.labels.count(), LABELS_MAX)
+
+    def test_shows_the_label_count(self, _):
+        self.user.labels.all().delete()
+        Label.objects.create(user=self.user, name="Travel")
+        self.assertContains(self.client.get(reverse("labels")), f"1 of {LABELS_MAX} labels")
+        Label.objects.bulk_create(Label(user=self.user, position=i + 1, name=f"Mine {chr(65 + i)}") for i in range(LABELS_MAX - 1))
+        self.assertContains(self.client.get(reverse("labels")), f"{LABELS_MAX} of {LABELS_MAX} labels. Delete one to add another.")
 
     def test_reset_to_defaults(self, _):
         self.user.labels.all().delete()
