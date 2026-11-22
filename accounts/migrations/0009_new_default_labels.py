@@ -22,8 +22,8 @@ NEW_LABELS = [
     {
         "emoji": "🏠",
         "name": "Personal",
-        "sublabels": "never",
-        "cleanup": "",
+        "sublabels": "one per person",
+        "cleanup": "never",
         "include": "Emails written to you by a real person you know: friends, family and personal conversations.",
         "exclude": "Not anything automated or sent to a big list (Newsletters).",
     },

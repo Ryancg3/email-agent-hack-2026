@@ -16,7 +16,8 @@ Your job: colleagues, managers, clients, meetings and projects.
 Not code notifications (Coding), not newsletters from work tools (Newsletters).
 
 ## 🏠 Personal
-Sub-labels: never
+Sub-labels: one per person
+Cleanup: never
 Emails written to you by a real person you know: friends, family and personal conversations.
 Not anything automated or sent to a big list (Newsletters).
 
