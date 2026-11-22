@@ -19,6 +19,16 @@
     {% endif %}
   </div>
 
+  {% if connection.status == "reconnect_needed" %}
+    <div class="alert alert-error" role="alert">
+      <div>
+        <strong>Google is disconnected, so the agent has stopped.</strong>
+        Google signed the agent out. Reconnect to start labeling email again.
+      </div>
+      <a class="btn btn-primary btn-sm alert-action" href="{% url 'google_connect' %}">Reconnect Google</a>
+    </div>
+  {% endif %}
+
   {% if failed_count %}
     <div class="alert alert-error" role="alert">
       <div>

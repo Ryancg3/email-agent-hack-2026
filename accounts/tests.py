@@ -162,6 +162,18 @@ class DashboardProblemsBannerTests(TestCase):
         self.assertNotContains(response, self.BANNER)
         self.assertNotContains(response, "Too old to count")
 
+    def test_reconnect_banner_when_google_disconnects(self):
+        GoogleConnection.objects.filter(user=self.user).update(status=GoogleConnection.Status.RECONNECT_NEEDED)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Google is disconnected, so the agent has stopped.")
+        self.assertContains(
+            response, f'class="btn btn-primary btn-sm alert-action" href="{reverse("google_connect")}"'
+        )
+
+    def test_no_reconnect_banner_while_connected(self):
+        response = self.client.get(reverse("dashboard"))
+        self.assertNotContains(response, "Google is disconnected")
+
 
 @mock.patch.object(runner.google_connect, "credentials", return_value=None)
 class RunnerTests(TestCase):
