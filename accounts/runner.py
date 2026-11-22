@@ -46,7 +46,8 @@ def run_user(user: User, rerun_newest: int = 0) -> None:
     except Exception as e:
         connection.last_error = str(e)
     connection.last_run_at = timezone.now()
-    connection.save()
+    # Only these fields: the push webhook writes others while the run is going.
+    connection.save(update_fields=["status", "last_error", "last_run_at"])
 
 
 def _label_names() -> list[str]:

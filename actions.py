@@ -8,7 +8,7 @@ add_to_digest only prints until its real behaviour is specced.
 
 from email.utils import getaddresses
 
-from anthropic import beta_tool
+from langchain_core.tools import tool
 
 import gcal
 import gmail
@@ -170,4 +170,5 @@ def _others_on_thread(original: dict, to: str) -> list[str]:
 
 # draft_reply is left out on purpose: drafts only come from the write-reply skill.
 ALL = [apply_label, add_to_digest, block_time, find_free_slots]
-TOOLS = [beta_tool(fn) for fn in ALL]
+# parse_docstring turns each Args entry into that argument's description.
+TOOLS = [tool(fn, parse_docstring=True) for fn in ALL]

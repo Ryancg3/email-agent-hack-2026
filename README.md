@@ -10,7 +10,8 @@ as drafts, never sent.
 ![How the email agent works](docs/agent-flow.png)
 
 1. **Trigger.** The web scheduler runs every 5 minutes for each enabled user, and
-   when someone clicks "Run now". The CLI processes the newest N emails of the
+   when someone clicks "Run now". With [Gmail push](docs/gmail-push.md) set up, it
+   runs within seconds of an email arriving instead, and polls only as a fallback. The CLI processes the newest N emails of the
    `token.json` account.
 2. **Classify** (Claude). Picks 0 to 3 labels from your Gmail labels, using the
    label descriptions each user edits on the web app's Labels tab (new users start
@@ -29,7 +30,9 @@ as drafts, never sent.
 5. **Extra actions** (Claude). A tool loop of at most 5 steps that can call the
    tools in [actions.py](actions.py) for anything beyond the required minimum.
 
-See [agent_outline.md](agent_outline.md) for the tools, limits and guardrails.
+See [agent_outline.md](agent_outline.md) for the tools, limits and guardrails, and
+[docs/system-design.md](docs/system-design.md) for the infrastructure, its trade-offs
+and where it breaks first.
 
 ## Setup
 
@@ -52,3 +55,9 @@ make test       # run the tests
 ```
 
 Run `make help` to see every command.
+
+## Hosting
+
+To keep the agent running when your laptop is off, deploy the Docker image to
+Railway (about $5 a month, [docs/deploy-railway.md](docs/deploy-railway.md)) or Render
+(about $7.25 a month, [docs/deploy-render.md](docs/deploy-render.md)).

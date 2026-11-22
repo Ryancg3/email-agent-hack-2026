@@ -6,6 +6,7 @@ from . import views
 urlpatterns = [
     path("", views.home, name="home"),
     path("health", views.health, name="health"),
+    path("gmail/push/", views.gmail_push, name="gmail_push"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("signup/", views.signup, name="signup"),
     path("login/", auth_views.LoginView.as_view(

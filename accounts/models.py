@@ -106,6 +106,12 @@ class GoogleConnection(models.Model):
     # When sub-label cleanup last ran; its reviews from that run share this time.
     last_cleanup_at = models.DateTimeField(null=True, blank=True)
     last_cleanup_error = models.TextField(blank=True)
+    # Gmail push (see accounts/push.py): set by the webhook when the inbox changes,
+    # cleared by the scheduler when it runs the agent.
+    push_received_at = models.DateTimeField(null=True, blank=True)
+    watch_expires_at = models.DateTimeField(null=True, blank=True)
+    watch_renew_at = models.DateTimeField(null=True, blank=True, help_text="Empty: renew now")
+    watch_error = models.TextField(blank=True)
 
 
 class ProcessedEmail(models.Model):

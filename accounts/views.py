@@ -1,11 +1,13 @@
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.db import DatabaseError, connection
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from oauthlib.oauth2 import OAuth2Error
 
@@ -13,7 +15,7 @@ import gmail
 import labels
 import run_context
 
-from . import cleanup_runner, google_connect, runner
+from . import cleanup_runner, google_connect, push, runner
 from .forms import LabelFormSet, SettingsForm, SignupForm
 from .models import GoogleConnection, Label, seed_labels, user_labels
 
@@ -27,6 +29,18 @@ def health(request):
     return JsonResponse({"status": "ok"})
 
 
+@csrf_exempt
+@require_POST
+def gmail_push(request):
+    """Pub/Sub push endpoint: Gmail says a watched inbox changed."""
+    if not push.token_ok(request.GET.get("token", "")):
+        return HttpResponse(status=403 if push.enabled() else 404)
+    # Always acknowledge: Pub/Sub retries anything but a 2xx for days.
+    if address := push.notified_address(request.body):
+        push.mark_pushed(address)
+    return HttpResponse(status=204)
+
+
 def home(request):
     return render(request, "accounts/landing.html")
 
@@ -34,6 +48,9 @@ def home(request):
 def signup(request):
     if request.user.is_authenticated:
         return redirect("dashboard")
+    if settings.SIGNUP_CLOSED:
+        messages.error(request, "Sign-up is closed on this server.")
+        return redirect("login")
     form = SignupForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         user = form.save()
@@ -55,6 +72,10 @@ def _render_dashboard(request, form):
         "form": form,
         "activity": request.user.processed_emails.all()[:20],
         "cleanup": cleanup_runner.last_result(request.user) if connection else None,
+        "push_on": bool(
+            push.enabled() and connection and connection.watch_expires_at
+            and connection.watch_expires_at > timezone.now()
+        ),
     })
 
 
@@ -220,6 +241,7 @@ def google_callback(request):
             "refresh_token": google_connect.encrypt(creds.refresh_token),
             "status": GoogleConnection.Status.CONNECTED,
             "last_error": "",
+            "watch_renew_at": None,  # watch the (possibly different) account right away
         },
     )
     messages.success(request, f"Connected {connection.google_email}.")
@@ -230,6 +252,7 @@ def google_callback(request):
 @require_POST
 def google_disconnect(request):
     if connection := GoogleConnection.objects.filter(user=request.user).first():
+        push.stop(connection)
         google_connect.revoke(connection)
         connection.delete()
         messages.success(request, "Google disconnected.")

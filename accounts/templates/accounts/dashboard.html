@@ -76,8 +76,11 @@
               <dd>{{ connection.google_email }}</dd>
               <dt>Last run</dt>
               <dd>{% if connection.last_run_at %}{{ connection.last_run_at|timesince }} ago{% else %}Not yet{% endif %}</dd>
+              <dt>New emails</dt>
+              <dd>{% if push_on %}Handled within seconds{% else %}Checked every 5 minutes{% endif %}</dd>
             </dl>
             {% if connection.last_error %}<p class="error-text">{{ connection.last_error }}</p>{% endif %}
+            {% if connection.watch_error %}<p class="error-text">{{ connection.watch_error }}</p>{% endif %}
             <div class="actions">
               {% if connection.status == "reconnect_needed" %}
                 <a class="btn btn-primary btn-sm" href="{% url 'google_connect' %}">Reconnect Google</a>

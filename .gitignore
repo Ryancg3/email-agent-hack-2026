@@ -6,3 +6,4 @@ credentials.json
 app.db*
 db.sqlite3*
 .coverage
+staticfiles/
