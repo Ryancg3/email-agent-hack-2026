@@ -5,7 +5,7 @@ google-auth-oauthlib
 django
 cryptography
 requests
-langchain
-langchain-anthropic
 gunicorn
 whitenoise
+langchain
+langchain-anthropic
