@@ -125,6 +125,44 @@ class AccountViewsTests(TestCase):
         self.assertIsNotNone(user.run_requested_at)
 
 
+class DashboardProblemsBannerTests(TestCase):
+    BANNER = "failed in the last 24 hours"
+
+    def setUp(self):
+        self.user = make_connected_user()
+        self.client.force_login(self.user)
+
+    def fail(self, message_id, error, hours_ago):
+        email = ProcessedEmail.objects.create(
+            user=self.user, message_id=message_id, status=ProcessedEmail.Status.ERROR, error=error
+        )
+        ProcessedEmail.objects.filter(pk=email.pk).update(
+            processed_at=django_timezone.now() - timedelta(hours=hours_ago)
+        )
+
+    def test_hidden_without_failures(self):
+        ProcessedEmail.objects.create(user=self.user, message_id="ok", subject="Fine")
+        response = self.client.get(reverse("dashboard"))
+        self.assertNotContains(response, self.BANNER)
+        self.assertNotContains(response, "Recent activity")
+        self.assertContains(response, "Run now")
+
+    def test_shows_count_and_latest_error_for_failures_in_the_last_24_hours(self):
+        self.fail("a", "Calendar insert failed", hours_ago=5)
+        self.fail("b", "Anthropic API overloaded", hours_ago=1)
+        self.fail("c", "Too old to count", hours_ago=30)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, f"2 emails {self.BANNER}")
+        self.assertContains(response, "Anthropic API overloaded")
+        self.assertNotContains(response, "Calendar insert failed")
+
+    def test_hidden_for_failures_older_than_24_hours(self):
+        self.fail("old", "Too old to count", hours_ago=25)
+        response = self.client.get(reverse("dashboard"))
+        self.assertNotContains(response, self.BANNER)
+        self.assertNotContains(response, "Too old to count")
+
+
 @mock.patch.object(runner.google_connect, "credentials", return_value=None)
 class RunnerTests(TestCase):
     def setUp(self):

@@ -19,52 +19,64 @@
     {% endif %}
   </div>
 
-  <div class="layout">
-    <section class="card">
-      <div class="card-header">
-        <h2 class="card-title">Recent activity</h2>
-        {% if connection %}
-          <form method="post" action="{% url 'run_now' %}">
-            {% csrf_token %}
-            <button class="btn btn-secondary btn-sm" {% if connection.status != "connected" %}disabled{% endif %}>Run now</button>
-          </form>
-        {% endif %}
+  {% if failed_count %}
+    <div class="alert alert-error" role="alert">
+      <div>
+        <strong>{{ failed_count }} email{{ failed_count|pluralize }} failed in the last 24 hours.</strong>
+        Latest, {{ latest_failure.processed_at|timesince }} ago: {{ latest_failure.error|default:"no error message"|truncatechars:160 }}
       </div>
+    </div>
+  {% endif %}
 
-      {% if activity %}
-        <ul class="activity">
-          {% for email in activity %}
-            <li>
-              <div class="subject">{{ email.subject|default:"(no subject)" }}</div>
-              <div class="badges">
-                {% if email.status == "error" %}
-                  <span class="badge badge-error"><span class="dot"></span>Failed</span>
-                {% else %}
-                  {% for label in email.label_list %}<span class="badge">{{ label }}</span>{% endfor %}
-                  <span class="badge badge-{{ email.urgency }}"><span class="dot"></span>{{ email.get_urgency_display }}</span>
-                {% endif %}
-              </div>
-              <div class="meta">
-                {{ email.processed_at|timesince }} ago{% if email.status == "error" %} · {{ email.error|truncatechars:90 }}{% endif %}
-              </div>
-            </li>
-          {% endfor %}
-        </ul>
-      {% elif connection %}
-        <div class="empty">
-          <span class="empty-icon">{% include "accounts/_icon.html" with name="inbox" %}</span>
-          <h3>Waiting for new email</h3>
-          <p>Emails that arrive from now on will show up here once the agent has handled them.</p>
-        </div>
-      {% else %}
-        <div class="empty">
-          <span class="empty-icon">{% include "accounts/_icon.html" with name="link" %}</span>
-          <h3>Connect Google to get started</h3>
-          <p>Allow access to Gmail and Calendar so the agent can label your email and block time to reply.</p>
-          <a class="btn btn-primary" href="{% url 'google_connect' %}">Connect Google</a>
-        </div>
+  <div class="layout">
+    <div class="stack">
+      {% if not connection %}
+        <section class="card">
+          <div class="empty">
+            <span class="empty-icon">{% include "accounts/_icon.html" with name="link" %}</span>
+            <h3>Connect Google to get started</h3>
+            <p>Allow access to Gmail and Calendar so the agent can label your email and block time to reply.</p>
+            <a class="btn btn-primary" href="{% url 'google_connect' %}">Connect Google</a>
+          </div>
+        </section>
       {% endif %}
-    </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2 class="card-title">Agent</h2>
+          {% if connection %}
+            <form method="post" action="{% url 'run_now' %}">
+              {% csrf_token %}
+              <button class="btn btn-secondary btn-sm" {% if connection.status != "connected" %}disabled{% endif %}>Run now</button>
+            </form>
+          {% endif %}
+        </div>
+        <div class="card-body">
+          <form method="post" action="{% url 'settings' %}">
+            {% csrf_token %}
+            {% for error in form.non_field_errors %}<p class="error-text">{{ error }}</p>{% endfor %}
+            <label class="switch">
+              {{ form.agent_enabled }}
+              <div><strong>Run automatically</strong><span>Checks for new email every 5 minutes.</span></div>
+            </label>
+            <label class="switch">
+              {{ form.cleanup_enabled }}
+              <div><strong>Delete finished sub-labels</strong><span>Once a month, or when you click Clean up. Off: only counts what it would delete.</span></div>
+            </label>
+            <div class="field-row">
+              <div class="field"><label for="{{ form.work_start.id_for_label }}">Work starts</label>{{ form.work_start }}</div>
+              <div class="field"><label for="{{ form.work_end.id_for_label }}">Work ends</label>{{ form.work_end }}</div>
+            </div>
+            <p class="muted small">Reply time is blocked Monday to Friday within these hours.</p>
+            <label class="switch">
+              {{ form.urgent_after_hours }}
+              <div><strong>Super-urgent emails after hours</strong><span>Blocks reply time for super-urgent emails within the hour, even in the evening or at the weekend.</span></div>
+            </label>
+            <button type="submit" class="btn btn-secondary btn-block">Save settings</button>
+          </form>
+        </div>
+      </section>
+    </div>
 
     <aside class="stack">
       <section class="card">
@@ -117,34 +129,6 @@
           </div>
         </section>
       {% endif %}
-
-      <section class="card">
-        <div class="card-header"><h2 class="card-title">Settings</h2></div>
-        <div class="card-body">
-          <form method="post" action="{% url 'settings' %}">
-            {% csrf_token %}
-            {% for error in form.non_field_errors %}<p class="error-text">{{ error }}</p>{% endfor %}
-            <label class="switch">
-              {{ form.agent_enabled }}
-              <div><strong>Run automatically</strong><span>Checks for new email every 5 minutes.</span></div>
-            </label>
-            <label class="switch">
-              {{ form.cleanup_enabled }}
-              <div><strong>Delete finished sub-labels</strong><span>Once a month, or when you click Clean up. Off: only counts what it would delete.</span></div>
-            </label>
-            <div class="field-row">
-              <div class="field"><label for="{{ form.work_start.id_for_label }}">Work starts</label>{{ form.work_start }}</div>
-              <div class="field"><label for="{{ form.work_end.id_for_label }}">Work ends</label>{{ form.work_end }}</div>
-            </div>
-            <p class="muted small">Reply time is blocked Monday to Friday within these hours.</p>
-            <label class="switch">
-              {{ form.urgent_after_hours }}
-              <div><strong>Super-urgent emails after hours</strong><span>Blocks reply time for super-urgent emails within the hour, even in the evening or at the weekend.</span></div>
-            </label>
-            <button type="submit" class="btn btn-secondary btn-block">Save settings</button>
-          </form>
-        </div>
-      </section>
     </aside>
   </div>
 

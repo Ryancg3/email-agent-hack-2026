@@ -311,7 +311,7 @@ input::placeholder, textarea::placeholder { color: var(--text-disabled); }
   border: 1px solid var(--border-strong); border-radius: var(--radius-xs);
 }
 .badge .dot { display: none; }
-.badge-instant, .badge-error { color: var(--tag-red); background: var(--tag-red-bg); border-color: var(--tag-red-border); }
+.badge-instant { color: var(--tag-red); background: var(--tag-red-bg); border-color: var(--tag-red-border); }
 .badge-schedule_time { color: var(--tag-orange); background: var(--tag-orange-bg); border-color: var(--tag-orange-border); }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
