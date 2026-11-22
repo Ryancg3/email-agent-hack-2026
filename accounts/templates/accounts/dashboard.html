@@ -6,120 +6,94 @@
   <div class="page-header">
     <div>
       <h1>Dashboard</h1>
-      <p class="muted">{{ user.get_full_name|default:user.email }}</p>
+      <p class="muted">Your agent, Google connection and working preferences.</p>
     </div>
-    {% if not connection %}
-      <span class="status status-off"><span class="dot"></span>Not connected</span>
-    {% elif connection.status == "reconnect_needed" %}
-      <span class="status status-warn"><span class="dot"></span>Reconnect needed</span>
-    {% elif user.agent_enabled %}
-      <span class="status status-on"><span class="dot"></span>Agent active</span>
-    {% else %}
-      <span class="status status-off"><span class="dot"></span>Paused</span>
-    {% endif %}
+    <span class="muted small">{{ user.get_full_name|default:user.email }}</span>
   </div>
 
-  <div class="layout">
-    <section class="card">
-      <div class="card-header">
-        <h2 class="card-title">Recent activity</h2>
-        {% if connection %}
-          <form method="post" action="{% url 'run_now' %}">
-            {% csrf_token %}
-            <button class="btn btn-secondary btn-sm" {% if connection.status != "connected" %}disabled{% endif %}>Run now</button>
-          </form>
+  <section class="card status-overview" aria-labelledby="status-overview-title">
+    <h2 id="status-overview-title" class="sr-only">Agent status</h2>
+    <div class="status-grid">
+      <div class="status-item">
+        <span class="status-label">Agent</span>
+        {% if user.agent_enabled %}
+          <span class="status-value status-inline status-on"><span class="dot"></span>Active</span>
+        {% else %}
+          <span class="status-value status-inline status-off"><span class="dot"></span>Paused</span>
         {% endif %}
       </div>
+      <div class="status-item">
+        <span class="status-label">Google</span>
+        {% if not connection %}
+          <span class="status-value status-inline status-off"><span class="dot"></span>Not connected</span>
+        {% elif connection.status == "reconnect_needed" %}
+          <span class="status-value status-inline status-warn"><span class="dot"></span>Reconnect needed</span>
+        {% else %}
+          <span class="status-value status-inline status-on"><span class="dot"></span>Connected</span>
+        {% endif %}
+      </div>
+      <div class="status-item">
+        <span class="status-label">Last run</span>
+        <span class="status-value">
+          {% if connection and connection.last_run_at %}{{ connection.last_run_at|timesince }} ago{% else %}Not yet{% endif %}
+        </span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Handled today (UTC)</span>
+        <span class="status-value">{{ handled_today }}</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">New mail</span>
+        <span class="status-value">{% if push_on %}Push · within seconds{% else %}Poll · every 5 minutes{% endif %}</span>
+      </div>
+    </div>
+  </section>
 
-      {% if activity %}
-        <ul class="activity">
-          {% for email in activity %}
-            <li>
-              <div class="subject">{{ email.subject|default:"(no subject)" }}</div>
-              <div class="badges">
-                {% if email.status == "error" %}
-                  <span class="badge badge-error"><span class="dot"></span>Failed</span>
-                {% else %}
-                  {% for label in email.label_list %}<span class="badge">{{ label }}</span>{% endfor %}
-                  <span class="badge badge-{{ email.urgency }}"><span class="dot"></span>{{ email.get_urgency_display }}</span>
-                {% endif %}
-              </div>
-              <div class="meta">
-                {{ email.processed_at|timesince }} ago{% if email.status == "error" %} · {{ email.error|truncatechars:90 }}{% endif %}
-              </div>
-            </li>
-          {% endfor %}
-        </ul>
-      {% elif connection %}
-        <div class="empty">
-          <span class="empty-icon">{% include "accounts/_icon.html" with name="inbox" %}</span>
-          <h3>Waiting for new email</h3>
-          <p>Emails that arrive from now on will show up here once the agent has handled them.</p>
-        </div>
-      {% else %}
-        <div class="empty">
-          <span class="empty-icon">{% include "accounts/_icon.html" with name="link" %}</span>
-          <h3>Connect Google to get started</h3>
-          <p>Allow access to Gmail and Calendar so the agent can label your email and block time to reply.</p>
-          <a class="btn btn-primary" href="{% url 'google_connect' %}">Connect Google</a>
-        </div>
-      {% endif %}
-    </section>
+  {% if connection.status == "reconnect_needed" %}
+    <div class="alert alert-error" role="alert">
+      <div>
+        <strong>Google is disconnected, so the agent has stopped.</strong>
+        Google signed the agent out. Reconnect to start labeling email again.
+      </div>
+      <a class="btn btn-primary btn-sm alert-action" href="{% url 'google_connect' %}">Reconnect Google</a>
+    </div>
+  {% endif %}
 
-    <aside class="stack">
-      <section class="card">
-        <div class="card-header"><h2 class="card-title">Google account</h2></div>
-        <div class="card-body">
-          {% if connection %}
-            <dl class="kv">
-              <dt>Connected as</dt>
-              <dd>{{ connection.google_email }}</dd>
-              <dt>Last run</dt>
-              <dd>{% if connection.last_run_at %}{{ connection.last_run_at|timesince }} ago{% else %}Not yet{% endif %}</dd>
-              <dt>New emails</dt>
-              <dd>{% if push_on %}Handled within seconds{% else %}Checked every 5 minutes{% endif %}</dd>
-            </dl>
-            {% if connection.last_error %}<p class="error-text">{{ connection.last_error }}</p>{% endif %}
-            {% if connection.watch_error %}<p class="error-text">{{ connection.watch_error }}</p>{% endif %}
-            <div class="actions">
-              {% if connection.status == "reconnect_needed" %}
-                <a class="btn btn-primary btn-sm" href="{% url 'google_connect' %}">Reconnect Google</a>
-              {% endif %}
-              <form method="post" action="{% url 'google_disconnect' %}">
-                {% csrf_token %}<button class="btn btn-danger btn-sm">Disconnect</button>
-              </form>
-            </div>
-          {% else %}
-            <p class="muted small">Not connected yet.</p>
-            <a class="btn btn-primary btn-block" href="{% url 'google_connect' %}">Connect Google</a>
-          {% endif %}
-        </div>
-      </section>
+  {% if failed_count %}
+    <div class="alert alert-error" role="alert">
+      <div>
+        <strong>{{ failed_count }} email{{ failed_count|pluralize }} failed in the last 24 hours.</strong>
+        Latest, {{ latest_failure.processed_at|timesince }} ago: {{ latest_failure.error|default:"no error message"|truncatechars:160 }}
+      </div>
+    </div>
+  {% endif %}
 
-      {% if connection %}
+  <div class="layout">
+    <div class="stack">
+      {% if not connection %}
         <section class="card">
-          <div class="card-header"><h2 class="card-title">Sub-label cleanup</h2></div>
-          <div class="card-body">
-            <dl class="kv">
-              <dt>Last cleanup</dt>
-              <dd>
-                {% if not cleanup %}Not yet
-                {% elif cleanup.would_remove %}{{ connection.last_cleanup_at|date:"M j" }}: would remove {{ cleanup.would_remove }} (dry run)
-                {% else %}{{ connection.last_cleanup_at|date:"M j" }}: {{ cleanup.removed }} sub-label{{ cleanup.removed|pluralize }} removed
-                {% endif %}
-              </dd>
-            </dl>
-            {% if connection.last_cleanup_error %}<p class="error-text">{{ connection.last_cleanup_error }}</p>{% endif %}
-            <form method="post" action="{% url 'cleanup_now' %}">
-              {% csrf_token %}
-              <button class="btn btn-secondary btn-block" {% if connection.status != "connected" %}disabled{% endif %}>Clean up sub-labels</button>
-            </form>
+          <div class="empty">
+            <span class="empty-icon">{% include "accounts/_icon.html" with name="link" %}</span>
+            <h3>Connect Google to get started</h3>
+            <p>Allow access to Gmail and Calendar so the agent can label your email and block time to reply.</p>
+            <a class="btn btn-primary" href="{% url 'google_connect' %}">Connect Google</a>
           </div>
         </section>
       {% endif %}
 
       <section class="card">
-        <div class="card-header"><h2 class="card-title">Settings</h2></div>
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Agent</h2>
+            <p class="card-subtitle">Choose when the agent runs and when it can block reply time.</p>
+          </div>
+          {% if connection %}
+            <form method="post" action="{% url 'run_now' %}">
+              {% csrf_token %}
+              <button class="btn btn-secondary btn-sm" {% if connection.status != "connected" %}disabled{% endif %}>Run now</button>
+            </form>
+          {% endif %}
+        </div>
         <div class="card-body">
           <form method="post" action="{% url 'settings' %}">
             {% csrf_token %}
@@ -145,6 +119,65 @@
           </form>
         </div>
       </section>
+    </div>
+
+    <aside class="stack">
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Google account</h2>
+            <p class="card-subtitle">The Gmail and Calendar account used by your agent.</p>
+          </div>
+        </div>
+        <div class="card-body">
+          {% if connection %}
+            <dl class="kv">
+              <dt>Connected as</dt>
+              <dd>{{ connection.google_email }}</dd>
+            </dl>
+            {% if connection.last_error %}<p class="error-text">{{ connection.last_error }}</p>{% endif %}
+            {% if connection.watch_error %}<p class="error-text">{{ connection.watch_error }}</p>{% endif %}
+            <div class="actions">
+              {% if connection.status == "reconnect_needed" or connection.reconnect_reminder_sent_at %}
+                <a class="btn btn-primary btn-sm" href="{% url 'google_connect' %}">Reconnect Google</a>
+              {% endif %}
+              <form method="post" action="{% url 'google_disconnect' %}">
+                {% csrf_token %}<button class="btn btn-danger btn-sm">Disconnect</button>
+              </form>
+            </div>
+          {% else %}
+            <p class="muted small">Not connected yet.</p>
+            <a class="btn btn-primary btn-block" href="{% url 'google_connect' %}">Connect Google</a>
+          {% endif %}
+        </div>
+      </section>
+
+      {% if connection %}
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Sub-label cleanup</h2>
+              <p class="card-subtitle">Remove finished sub-labels or preview what would change.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <dl class="kv">
+              <dt>Last cleanup</dt>
+              <dd>
+                {% if not cleanup %}Not yet
+                {% elif cleanup.would_remove %}{{ connection.last_cleanup_at|date:"M j" }}: would remove {{ cleanup.would_remove }} (dry run)
+                {% else %}{{ connection.last_cleanup_at|date:"M j" }}: {{ cleanup.removed }} sub-label{{ cleanup.removed|pluralize }} removed
+                {% endif %}
+              </dd>
+            </dl>
+            {% if connection.last_cleanup_error %}<p class="error-text">{{ connection.last_cleanup_error }}</p>{% endif %}
+            <form method="post" action="{% url 'cleanup_now' %}">
+              {% csrf_token %}
+              <button class="btn btn-secondary btn-block" {% if connection.status != "connected" %}disabled{% endif %}>Clean up sub-labels</button>
+            </form>
+          </div>
+        </section>
+      {% endif %}
     </aside>
   </div>
 

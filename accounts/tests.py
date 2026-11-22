@@ -19,7 +19,7 @@ import labels
 import run_context
 import sublabel_cleanup
 
-from . import cleanup_runner, google_connect, push, runner
+from . import cleanup_runner, google_connect, push, reminder, runner
 from .management.commands import run_scheduler
 from .forms import LABELS_MAX
 from .models import GoogleConnection, Label, ProcessedEmail, SublabelReview, User
@@ -154,6 +154,85 @@ class GoogleCallbackTests(TestCase):
         self.assertGreater(connection.connected_at, self.old_cutoff + timedelta(days=29))
 
 
+class DashboardProblemsBannerTests(TestCase):
+    BANNER = "failed in the last 24 hours"
+
+    def setUp(self):
+        self.user = make_connected_user()
+        self.client.force_login(self.user)
+
+    def fail(self, message_id, error, hours_ago):
+        email = ProcessedEmail.objects.create(
+            user=self.user, message_id=message_id, status=ProcessedEmail.Status.ERROR, error=error
+        )
+        ProcessedEmail.objects.filter(pk=email.pk).update(
+            processed_at=django_timezone.now() - timedelta(hours=hours_ago)
+        )
+
+    def test_hidden_without_failures(self):
+        ProcessedEmail.objects.create(user=self.user, message_id="ok", subject="Fine")
+        response = self.client.get(reverse("dashboard"))
+        self.assertNotContains(response, self.BANNER)
+        self.assertNotContains(response, "Recent activity")
+        self.assertContains(response, "Run now")
+
+    def test_shows_count_and_latest_error_for_failures_in_the_last_24_hours(self):
+        self.fail("a", "Calendar insert failed", hours_ago=5)
+        self.fail("b", "Anthropic API overloaded", hours_ago=1)
+        self.fail("c", "Too old to count", hours_ago=30)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, f"2 emails {self.BANNER}")
+        self.assertContains(response, "Anthropic API overloaded")
+        self.assertNotContains(response, "Calendar insert failed")
+
+    def test_hidden_for_failures_older_than_24_hours(self):
+        self.fail("old", "Too old to count", hours_ago=25)
+        response = self.client.get(reverse("dashboard"))
+        self.assertNotContains(response, self.BANNER)
+        self.assertNotContains(response, "Too old to count")
+
+    def test_reconnect_banner_when_google_disconnects(self):
+        GoogleConnection.objects.filter(user=self.user).update(status=GoogleConnection.Status.RECONNECT_NEEDED)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Google is disconnected, so the agent has stopped.")
+        self.assertContains(
+            response, f'class="btn btn-primary btn-sm alert-action" href="{reverse("google_connect")}"'
+        )
+
+    def test_no_reconnect_banner_while_connected(self):
+        response = self.client.get(reverse("dashboard"))
+        self.assertNotContains(response, "Google is disconnected")
+
+
+class DashboardStatusOverviewTests(TestCase):
+    def setUp(self):
+        self.user = make_connected_user()
+        self.client.force_login(self.user)
+
+    def test_shows_agent_google_run_count_and_delivery_status(self):
+        self.user.google.last_run_at = django_timezone.now() - timedelta(minutes=10)
+        self.user.google.save(update_fields=["last_run_at"])
+        today_start = django_timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        ProcessedEmail.objects.create(user=self.user, message_id="ok-today")
+        ProcessedEmail.objects.create(
+            user=self.user, message_id="failed-today", status=ProcessedEmail.Status.ERROR
+        )
+        old = ProcessedEmail.objects.create(user=self.user, message_id="ok-yesterday")
+        ProcessedEmail.objects.filter(pk=old.pk).update(
+            processed_at=today_start - timedelta(microseconds=1)
+        )
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Agent status")
+        self.assertContains(response, "Active")
+        self.assertContains(response, "Connected")
+        self.assertContains(response, "Last run")
+        self.assertContains(response, "Handled today (UTC)")
+        self.assertContains(response, '<span class="status-value">1</span>', html=True)
+        self.assertContains(response, "Poll · every 5 minutes")
+
+
 @mock.patch.object(runner.google_connect, "credentials", return_value=None)
 class RunnerTests(TestCase):
     def setUp(self):
@@ -196,6 +275,15 @@ class RunnerTests(TestCase):
         runner.gmail.list_inbox_ids.assert_called_once_with(3)  # no connected_at cutoff
         self.assertEqual(seen, ["m1", "m2", "m3"])
         self.assertEqual(self.user.processed_emails.get(message_id="m1").subject, "subject m1")
+
+    def test_run_now_skips_the_agents_own_reminder(self, _):
+        ProcessedEmail.objects.create(user=self.user, message_id="m2", status=ProcessedEmail.Status.SKIPPED)
+        seen = []
+        result = SimpleNamespace(labels=[], urgency="not_urgent")
+        with mock.patch.object(runner.agent, "run", lambda email, labels: seen.append(email.id) or result):
+            runner.run_user(self.user, rerun_newest=3)
+        self.assertEqual(seen, ["m1", "m3"])
+        self.assertEqual(self.user.processed_emails.get(message_id="m2").status, ProcessedEmail.Status.SKIPPED)
 
     def test_reply_skill_uses_the_users_name(self, _):
         self.user.first_name, self.user.last_name = "Ada", "Lovelace"
@@ -649,9 +737,9 @@ class GmailPushWebhookTests(TestCase):
 
     def test_dashboard_says_how_new_emails_are_handled(self):
         self.client.force_login(self.user)
-        self.assertContains(self.client.get(reverse("dashboard")), "Checked every 5 minutes")
+        self.assertContains(self.client.get(reverse("dashboard")), "Poll · every 5 minutes")
         GoogleConnection.objects.update(watch_expires_at=django_timezone.now() + timedelta(days=7))
-        self.assertContains(self.client.get(reverse("dashboard")), "Handled within seconds")
+        self.assertContains(self.client.get(reverse("dashboard")), "Push · within seconds")
 
 
 @override_settings(**PUSH_SETTINGS)
@@ -748,3 +836,122 @@ class GmailWatchRenewalTests(TestCase):
             self.client.post(reverse("google_disconnect"))
         stop.assert_called_once()
         self.assertFalse(GoogleConnection.objects.exists())
+
+
+@mock.patch.object(runner.google_connect, "credentials", return_value=None)
+class ReconnectReminderTests(TestCase):
+    def setUp(self):
+        self.user = make_connected_user()
+        self.user.first_name = "Ada"
+        self.user.save()
+        patcher = mock.patch.object(reminder.gmail, "insert_into_inbox", return_value="r1")
+        self.insert = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def authorized(self, ago):
+        GoogleConnection.objects.update(authorized_at=django_timezone.now() - ago)
+
+    def test_not_sent_before_day_six(self, _):
+        self.authorized(timedelta(days=5, hours=23))
+        reminder.send_due()
+        self.insert.assert_not_called()
+
+    def test_sent_once_on_day_six_and_skipped_by_the_agent(self, _):
+        self.authorized(timedelta(days=6))
+        reminder.send_due()
+        reminder.send_due()  # already sent
+        self.insert.assert_called_once()
+        subject, body = self.insert.call_args.args
+        self.assertEqual(subject, reminder.SUBJECT)
+        self.assertIn("Hi Ada,", body)
+        self.assertIn("http://localhost:8000/google/connect/", body)
+        self.assertIsNotNone(GoogleConnection.objects.get().reconnect_reminder_sent_at)
+        self.assertEqual(self.user.processed_emails.get(message_id="r1").status, ProcessedEmail.Status.SKIPPED)
+
+    def test_reconnecting_during_the_reminder_keeps_the_new_grants_reminder(self, _):
+        self.authorized(timedelta(days=6))
+
+        def reconnect_meanwhile(subject, body):
+            GoogleConnection.objects.update(authorized_at=django_timezone.now(), reconnect_reminder_sent_at=None)
+            return "r1"
+
+        self.insert.side_effect = reconnect_meanwhile
+        reminder.send_due()
+        self.assertIsNone(GoogleConnection.objects.get().reconnect_reminder_sent_at)
+
+    def test_reconnecting_during_a_failed_reminder_stays_connected(self, _):
+        self.authorized(timedelta(days=6))
+
+        def reconnect_then_fail(subject, body):
+            GoogleConnection.objects.update(authorized_at=django_timezone.now())
+            raise RefreshError("invalid_grant")
+
+        self.insert.side_effect = reconnect_then_fail
+        reminder.send_due()
+        self.assertEqual(GoogleConnection.objects.get().status, GoogleConnection.Status.CONNECTED)
+
+    def test_not_sent_once_google_already_disconnected(self, _):
+        self.authorized(timedelta(days=8))
+        GoogleConnection.objects.update(status=GoogleConnection.Status.RECONNECT_NEEDED)
+        reminder.send_due()
+        self.insert.assert_not_called()
+
+    def test_expired_access_shows_the_banner_instead(self, _):
+        self.authorized(timedelta(days=6))
+        self.insert.side_effect = RefreshError("invalid_grant")
+        reminder.send_due()
+        connection = GoogleConnection.objects.get()
+        self.assertEqual(connection.status, GoogleConnection.Status.RECONNECT_NEEDED)
+        self.assertIsNone(connection.reconnect_reminder_sent_at)
+
+    def test_other_failures_retry_on_the_next_poll(self, _):
+        self.authorized(timedelta(days=6))
+        self.insert.side_effect = RuntimeError("Gmail is down")
+        reminder.send_due()
+        self.assertIsNone(GoogleConnection.objects.get().reconnect_reminder_sent_at)
+        self.insert.side_effect, self.insert.return_value = None, "r2"
+        reminder.send_due()
+        self.assertIsNotNone(GoogleConnection.objects.get().reconnect_reminder_sent_at)
+
+    def test_link_uses_the_public_host(self, _):
+        with self.settings(APP_HOST="agent.example.com"):
+            self.assertEqual(reminder.reconnect_url(), "https://agent.example.com/google/connect/")
+
+    def test_reconnecting_starts_a_new_seven_days(self, _):
+        self.authorized(timedelta(days=6))
+        reminder.send_due()
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["google_oauth"] = {"state": "s", "code_verifier": "v"}
+        session.save()
+        creds = SimpleNamespace(refresh_token="new-refresh")
+        with mock.patch.object(google_connect, "exchange_code", return_value=creds), \
+                mock.patch.object(google_connect, "has_all_scopes", return_value=True), \
+                mock.patch.object(google_connect, "account_email", return_value="a@example.com"):
+            self.client.get(reverse("google_callback"), {"state": "s", "code": "c"})
+        connection = GoogleConnection.objects.get()
+        self.assertIsNone(connection.reconnect_reminder_sent_at)
+        self.assertAlmostEqual(connection.authorized_at, django_timezone.now(), delta=timedelta(minutes=1))
+
+    def test_dashboard_offers_reconnect_after_the_reminder(self, _):
+        self.client.force_login(self.user)
+        self.assertNotContains(self.client.get(reverse("dashboard")), "Reconnect Google")
+        GoogleConnection.objects.update(reconnect_reminder_sent_at=django_timezone.now())
+        self.assertContains(self.client.get(reverse("dashboard")), "Reconnect Google")
+
+
+class GmailInsertTests(SimpleTestCase):
+    def test_puts_an_unread_email_to_self_in_the_inbox_without_sending(self):
+        service = mock.Mock()
+        service.users().messages().insert().execute.return_value = {"id": "m9"}
+        with mock.patch("gmail._service", return_value=service), \
+                mock.patch("gmail.my_address", return_value="a@example.com"):
+            import gmail
+            self.assertEqual(gmail.insert_into_inbox("Hello", "Body text"), "m9")
+        body = service.users().messages().insert.call_args.kwargs["body"]
+        self.assertEqual(body["labelIds"], ["INBOX", "UNREAD"])
+        raw = base64.urlsafe_b64decode(body["raw"]).decode()
+        self.assertIn("To: a@example.com", raw)
+        self.assertIn("From: Inbox Agent <a@example.com>", raw)
+        self.assertIn("Subject: Hello", raw)
+        service.users().messages().send.assert_not_called()

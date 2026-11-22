@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, time, timedelta
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
@@ -17,7 +19,7 @@ import run_context
 
 from . import cleanup_runner, google_connect, push, runner
 from .forms import LabelFormSet, SettingsForm, SignupForm
-from .models import GoogleConnection, Label, seed_labels, user_labels
+from .models import GoogleConnection, Label, ProcessedEmail, seed_labels, user_labels
 
 
 def health(request):
@@ -67,10 +69,23 @@ def dashboard(request):
 
 def _render_dashboard(request, form):
     connection = GoogleConnection.objects.filter(user=request.user).first()
+    # Users do not have a saved time zone yet, so use an explicit UTC day and
+    # label it as UTC in the dashboard rather than implying a local boundary.
+    today_start = datetime.combine(timezone.now().date(), time.min, tzinfo=UTC)
+    handled_today = request.user.processed_emails.filter(
+        status=ProcessedEmail.Status.OK,
+        processed_at__gte=today_start,
+        processed_at__lt=today_start + timedelta(days=1),
+    ).count()
+    failed = request.user.processed_emails.filter(
+        status=ProcessedEmail.Status.ERROR, processed_at__gte=timezone.now() - timedelta(hours=24)
+    )
     return render(request, "accounts/dashboard.html", {
         "connection": connection,
         "form": form,
-        "activity": request.user.processed_emails.all()[:20],
+        "handled_today": handled_today,
+        "failed_count": failed.count(),
+        "latest_failure": failed.first(),
         "cleanup": cleanup_runner.last_result(request.user) if connection else None,
         "push_on": bool(
             push.enabled() and connection and connection.watch_expires_at
@@ -240,6 +255,8 @@ def google_callback(request):
         "refresh_token": google_connect.encrypt(creds.refresh_token),
         "status": GoogleConnection.Status.CONNECTED,
         "last_error": "",
+        "authorized_at": timezone.now(),  # Google's 7 days start again
+        "reconnect_reminder_sent_at": None,
         "watch_renew_at": None,  # watch the (possibly different) account right away
     }
     previous = GoogleConnection.objects.filter(user=request.user).first()
