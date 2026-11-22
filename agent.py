@@ -45,9 +45,6 @@ How many minutes the user needs to respond to the email, for example to find a m
 needs_reply (true or false)
 True only if a person is waiting for a written answer from the user. False for newsletters, notifications, receipts and no-reply senders.
 
-summary (string)
-One sentence.
-
 sub-labels (one entry per label in labels)
 For each label:
 - sublabel_needed (true or false): True only if the label covers several separate things that each get more than one email, such as an event, a project, a trip or an application. The sub-label then groups the emails about that one thing. Never true for streams such as newsletters, receipts or notifications, and never for a label whose sub-label rule is "never".
@@ -80,7 +77,6 @@ def result_model(label_names: list[str]) -> type[BaseModel]:
         urgency=(Urgency, ...),
         minutes_needed=(int, ...),
         needs_reply=(bool, ...),
-        summary=(str, ...),
     )
 
 
@@ -153,9 +149,9 @@ def sender_name(email: Email) -> str:
 
 
 def block_notes(email: Email, result) -> str:
-    """Description for the calendar block: who, what, how it was labelled."""
+    """Description for the calendar block: who, about what, how it was labelled."""
     picked = ", ".join(choice.label for choice in result.labels) or "none"
-    return f"From: {email.sender}\nSubject: {email.subject}\nLabels: {picked}\n\n{result.summary}"
+    return f"From: {email.sender}\nSubject: {email.subject}\nLabels: {picked}"
 
 
 # The minimum that always happens, run by code (not Claude): labelling, then the

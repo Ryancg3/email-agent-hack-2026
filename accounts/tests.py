@@ -537,12 +537,12 @@ class LangChainAgentTests(SimpleTestCase):
     def test_act_runs_a_tool_in_the_users_context_one_at_a_time(self):
         seen = []
 
-        def take_note(summary: str) -> str:
+        def take_note(note: str) -> str:
             """Take a note about the email."""
-            seen.append((summary, run_context.current()))
+            seen.append((note, run_context.current()))
             return "noted"
 
-        fake = FakeClaude(messages=iter([tool_call("take_note", {"summary": "Bob says hi"}), AIMessage(content="Noted.")]), bound=[])
+        fake = FakeClaude(messages=iter([tool_call("take_note", {"note": "Bob says hi"}), AIMessage(content="Noted.")]), bound=[])
         ctx = run_context.RunContext(None)
         with mock.patch.object(agent, "act_model", lambda: fake), mock.patch.object(
             actions, "TOOLS", [tool(take_note)]
@@ -555,12 +555,12 @@ class LangChainAgentTests(SimpleTestCase):
     def test_act_stops_after_max_steps(self):
         calls = []
 
-        def take_note(summary: str) -> str:
+        def take_note(note: str) -> str:
             """Take a note about the email."""
-            calls.append(summary)
+            calls.append(note)
             return "noted"
 
-        endless = (tool_call("take_note", {"summary": str(n)}) for n in range(100))
+        endless = (tool_call("take_note", {"note": str(n)}) for n in range(100))
         fake = FakeClaude(messages=endless, bound=[])
         with mock.patch.object(agent, "act_model", lambda: fake), mock.patch.object(
             actions, "TOOLS", [tool(take_note)]

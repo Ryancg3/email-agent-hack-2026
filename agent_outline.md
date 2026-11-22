@@ -23,7 +23,7 @@ Define each component before writing any skill. Fill in the right column for you
 | ------------ | ---------------------------------------------------- | ----------------------------------- |
 | Goal         | One sentence: what the agent achieves and for whom   | emaila agent that is inivisble&#32; |
 | Model        | Which model, and whether subagents use a cheaper one | Claude Opus 5.5 (`claude-opus-5-5`) for both steps |
-| Instructions | System prompt: role, tone, hard rules, when to stop  | Two prompts in `agent.py`: triage (pick 0 to 3 labels with sub-labels, urgency, minutes needed, summary) and act (take extra actions, don't repeat done ones, stop when nothing more helps) |
+| Instructions | System prompt: role, tone, hard rules, when to stop  | Two prompts in `agent.py`: triage (pick 0 to 3 labels with sub-labels, urgency, minutes needed, whether a reply is needed) and act (take extra actions, don't repeat done ones, stop when nothing more helps) |
 | Tools        | APIs, MCP servers, file access, web search           | gmail & gcal MCP                    |
 | Memory       | What persists between runs, and where it is stored   | topics&#32;                         |
 | Loop         | Plan, act, observe, repeat; max steps per run        | Per email: classify (one call), run required actions in code, draft a reply if `needs_reply` (one call), then Claude calls tools for extras; max 5 steps |
@@ -106,7 +106,7 @@ A subagent is a separate model call with its own instructions, tools and context
 
 | Subagent | Task delegated | Inputs | Returns | Model | Tools |
 | -------- | -------------- | ------ | ------- | ----- | ----- |
-| classifier | Triage one email (already a separate call in `agent.py`) | email, top-level labels (read from Gmail per email) with their description and sub-label rule from `labels.md` and their existing sub-labels | 0 to 3 labels (none if nothing fits), each with whether a sub-label is needed and its name (at most 3 labels in total, sub-labels included), urgency, minutes needed, summary | Opus 5.5 today; try Haiku 5.5 after measuring | none |
+| classifier | Triage one email (already a separate call in `agent.py`) | email, top-level labels (read from Gmail per email) with their description and sub-label rule from `labels.md` and their existing sub-labels | 0 to 3 labels (none if nothing fits), each with whether a sub-label is needed and its name (at most 3 labels in total, sub-labels included), urgency, minutes needed, whether a reply is needed | Opus 5.5 today; try Haiku 5.5 after measuring | none |
 |          |                |        |         |       |       |
 
 ## Guardrails and evaluation
