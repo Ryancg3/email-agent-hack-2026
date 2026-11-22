@@ -7,3 +7,5 @@ cryptography
 requests
 gunicorn
 whitenoise
+langchain
+langchain-anthropic

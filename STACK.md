@@ -11,7 +11,7 @@ An email-triage agent with a small web app around it. It reads Gmail, classifies
 | Backend | Django 6.1 (WSGI) |
 | Frontend | Server-rendered Django templates, one hand-written CSS file |
 | Database | SQLite (`app.db`, WAL mode) |
-| AI | Anthropic SDK, `claude-sonnet-5-5`, pydantic structured output |
+| AI | LangChain (`langchain`, `langchain-anthropic`), `claude-sonnet-5-5`, pydantic structured output |
 | Integrations | Gmail API, Google Calendar API, Google OAuth |
 | Background work | Custom `run_scheduler` management command |
 | Tests | Django `TestCase` + `unittest.mock` |
@@ -22,7 +22,7 @@ Versions are the ones installed in `.venv`. `requirements.txt` doesn't pin any.
 ## Language and tooling
 
 - Python 3.13, in a `.venv` created by `uv venv`.
-- Dependencies are installed with `uv pip install -r requirements.txt`. The file lists `anthropic`, `pydantic`, `google-api-python-client`, `google-auth-oauthlib`, `django`, `cryptography`, `requests`, `gunicorn` and `whitenoise`.
+- Dependencies are installed with `uv pip install -r requirements.txt`. The file lists `anthropic`, `langchain`, `langchain-anthropic`, `pydantic`, `google-api-python-client`, `google-auth-oauthlib`, `django`, `cryptography`, `requests`, `gunicorn` and `whitenoise`.
 - Secrets live in `.env` (template: `.env.example`) and are loaded with `uv run --env-file .env`.
 - `Makefile` targets:
   - `make setup`, `make install`, `make migrate`, `make superuser`
@@ -61,11 +61,12 @@ Versions are the ones installed in `.venv`. `requirements.txt` doesn't pin any.
 
 ## AI and agent
 
-- `anthropic` SDK, model `claude-sonnet-5-5` (set in `agent.py`).
-- **Classification:** one `messages.parse` call per email. A dynamic pydantic model returns up to 3 labels with sub-labels, an urgency, the minutes needed, whether a reply is needed, and a summary.
+- LangChain v1 with `langchain-anthropic` (`ChatAnthropic`), model `claude-sonnet-5-5` (set in `agent.py`). The `anthropic` SDK stays as a dependency: LangChain calls it, and its error classes are what the runners catch.
+- **One-shot calls:** `agent.ask` wraps `with_structured_output(..., method="json_schema")`, Claude's native structured output. Classification, reply drafting and the sub-label cleanup judge all use it.
+- **Classification:** one `agent.ask` call per email. A dynamic pydantic model returns up to 3 labels with sub-labels, an urgency, the minutes needed, whether a reply is needed, and a summary.
 - **Label rules:** `labels.md` describes each label to the classifier.
 - **Reply drafting:** a separate call guided by `skills/write-reply/SKILL.md`. Replies are saved as Gmail drafts and never sent.
-- **Extra actions:** `beta.messages.tool_runner` with tools defined through `anthropic.beta_tool` in `actions.py`.
+- **Extra actions:** `langchain.agents.create_agent` with the functions in `actions.py` wrapped by `langchain_core.tools.tool`. `ModelCallLimitMiddleware` stops the loop after 5 Claude calls, and parallel tool calls are turned off because the Google API clients aren't thread-safe.
 - No vector store or RAG.
 
 ## Integrations
