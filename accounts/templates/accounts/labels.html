@@ -36,6 +36,9 @@
       <div>
         <h2 class="card-title">Label rules</h2>
         <p class="card-subtitle">Click a label to edit what belongs in it. Names match Gmail by letters only.</p>
+        <p class="card-subtitle label-count">
+          {{ label_count }} of {{ labels_max }} labels{% if label_count >= labels_max %}. Delete one to add another.{% endif %}
+        </p>
       </div>
     </div>
 
@@ -52,7 +55,7 @@
       <template id="label-template">{% include "accounts/_label_row.html" with form=formset.empty_form %}</template>
 
       <div class="label-footer">
-        <button type="button" class="btn btn-secondary" id="add-label">
+        <button type="button" class="btn btn-secondary" id="add-label"{% if label_count >= labels_max %} disabled title="You have the most labels allowed. Delete one to add another."{% endif %}>
           {% include "accounts/_icon.html" with name="plus" class="icon-sm" %} Add label
         </button>
         <button type="submit" class="btn btn-primary">Save labels</button>

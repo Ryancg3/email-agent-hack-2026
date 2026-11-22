@@ -15,7 +15,7 @@ You get the email (with its To and Cc), its classification, and the actions alre
    `reply_all_reason` in one short sentence; leave the reason empty when `reply_all` is false.
 3. Write the body:
    - Reply in the language of the email.
-   - Match the sender's formality: formal for professors, offices and companies,
+   - Match the sender's formality: formal for officials, offices and companies,
      casual for friends. Keep it short; answer what was asked and nothing more.
    - When replying all, write so it reads right for everyone on the thread, not just the sender.
    - Never invent facts, dates, commitments or attachments. Where the reply needs

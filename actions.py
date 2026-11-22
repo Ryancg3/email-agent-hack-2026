@@ -25,7 +25,7 @@ def apply_label(message_id: str, label_name: str, sublabel: str | None = None) -
     Args:
         message_id: Gmail id of the email.
         label_name: Name of an existing top-level Gmail label.
-        sublabel: Name of a sub-label under label_name, without the parent (e.g. "Berlin Hackathon").
+        sublabel: Name of a sub-label under label_name, without the parent (e.g. "Summer Conference").
             Created if it doesn't exist. One level deep only; never for labels whose sub-label rule in labels.md is never.
     """
     # Gmail label names are unique ignoring case, so match them that way.

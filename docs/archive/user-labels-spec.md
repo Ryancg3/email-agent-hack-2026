@@ -52,8 +52,8 @@ Why rows and not markdown: the editor has one field per part of a label, so stor
 
 | labels.md | Field |
 | --------- | ----- |
-| `## 🎓 University` | emoji `🎓`, name `University` (a leading emoji is split off) |
-| `Sub-labels: one per course or thesis` | sublabels |
+| `## ✈️ Travel` | emoji `✈️`, name `Travel` (a leading emoji is split off) |
+| `Sub-labels: one per trip` | sublabels |
 | Lines starting with `Not ` | exclude, with the `Not ` kept |
 | Every other line | include |
 
@@ -75,7 +75,7 @@ A user who deletes every row gets seeded again on the next load or run. That's a
 Each label becomes one prompt line, as today, with the exclude part kept separate:
 
 ```
-- 🎓 University: Courses, exams, thesis, professors and TU Berlin admin. Not PhD applications (phd admissions). Sub-labels: one per course or thesis.
+- ✈️ Travel: Flights, trains, hotels, bookings and itineraries. Not events in another city, unless the email is about booking the travel. Sub-labels: one per trip.
 ```
 
 The line uses the Gmail label name (which may carry its own emoji), as `describe` does now. `agent.py` and `actions.py` don't change.

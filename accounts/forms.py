@@ -89,6 +89,10 @@ class LabelForm(forms.ModelForm):
 
 
 class BaseLabelFormSet(forms.BaseModelFormSet):
+    default_error_messages = {
+        "too_many_forms": "You can have at most %(num)d labels. Delete one to add another.",
+    }
+
     def clean(self):
         super().clean()
         seen = set()

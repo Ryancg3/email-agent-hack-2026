@@ -47,7 +47,7 @@ True only if a person is waiting for a written answer from the user. False for n
 
 sub-labels (one entry per label in labels)
 For each label:
-- sublabel_needed (true or false): True only if the label covers several separate things that each get more than one email, such as an event, a project, a trip or an application. The sub-label then groups the emails about that one thing. Never true for streams such as newsletters, receipts or notifications, and never for a label whose sub-label rule is "never".
+- sublabel_needed (true or false): True when the label's sub-label rule says what to group by, such as one per trip, per repository or per person; this includes notifications, e.g. GitHub emails grouped by repository. Without such a rule, true only if the label covers several separate things that each get more than one email, such as an event, a project, a trip or an application. The sub-label then groups the emails about that one thing. Never true for streams with no such grouping, such as newsletters or receipts, and never for a label whose sub-label rule is "never".
 - sublabel (string or null): null when sublabel_needed is false. Otherwise, use the exact name of one of that label's existing sub-labels if one fits. If none fits, give a new name of 1 to 4 words without "/".
 
 Total cap: labels and sub-labels together make at most 3. A sub-label counts as a label, so one label with a sub-label plus one more label is the maximum.."""
