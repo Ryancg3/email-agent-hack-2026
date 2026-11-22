@@ -234,44 +234,114 @@ input::placeholder, textarea::placeholder { color: var(--text-disabled); }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .field-row .field { margin-bottom: 8px; }
 
-/* Labels tab: an Ant Table with inline inputs */
+/* Labels tab: an Ant Collapse, one panel per label */
 .label-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
 .label-note form { margin: 0; }
 .alert.label-note { justify-content: flex-start; }
-.labels-card { overflow: hidden; }
 .labels-form { margin: 0; }
 .label-errors { margin: 16px 24px 0; }
-.label-row {
-  display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr) minmax(0, 2fr) 84px;
-  gap: 12px; align-items: start; padding: 12px 16px; border-top: 1px solid var(--border);
+.label-empty { margin: 0; padding: 24px; text-align: center; }
+.label-list:has(.label-item) .label-empty { display: none; }
+.label-item { position: relative; border-top: 1px solid var(--border); }
+.label-item:first-of-type { border-top: 0; }
+.label-item.has-errors { box-shadow: inset 3px 0 0 var(--danger); }
+.label-summary {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 56px; padding: 12px 64px 12px 24px;
+  list-style: none; cursor: pointer; user-select: none;
+  transition: background 0.2s;
 }
-.label-head {
-  border-top: 0; padding-top: 14px; padding-bottom: 14px;
-  font-weight: 600; color: var(--text);
-  background: var(--surface-muted); border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+.label-summary::-webkit-details-marker { display: none; }
+.label-summary:hover { background: var(--surface-muted); }
+.label-summary:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
+.label-icon {
+  display: grid; place-items: center; flex: none; width: 32px; height: 32px;
+  font-size: 18px; line-height: 1; color: var(--text-subtle);
+  background: var(--surface-muted); border: 1px solid var(--border); border-radius: var(--radius-sm);
 }
-.label-row:not(.label-head):hover { background: var(--surface-muted); }
-.label-new { background: var(--surface-alt); }
-.label-cell { min-width: 0; }
-.label-cell-name { display: none; }
-.label-row input[type="text"], .label-row textarea { padding: 4px 11px; font-size: 14px; }
-.label-row textarea { min-height: 32px; resize: vertical; overflow: hidden; }
-.label-emoji input[type="text"] { text-align: center; font-size: 16px; }
-.label-cell.has-error input, .label-cell.has-error textarea { border-color: var(--danger); }
-.label-cell .badge { margin-top: 6px; }
-.label-remove { padding-top: 5px; }
-.remove-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; }
+.label-icon .icon-sm { display: none; }
+.label-emoji:empty { display: none; }
+.label-emoji:empty + .icon-sm { display: block; }
+.label-name { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+/* The preview stops at 60 characters' width so long descriptions stay a short hint. */
+.label-preview { flex: 0 1 auto; max-width: 60ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--text-subtle); }
+.label-chevron { margin-left: auto; color: var(--text-subtle); transition: transform 0.2s; }
+.label-details[open] > .label-summary .label-chevron { transform: rotate(180deg); }
+.label-summary .label-removed { display: none; }
+.label-item:has(.label-menu input:checked) .label-summary .label-removed { display: inline-flex; }
+.label-item:has(.label-menu input:checked) .label-name { text-decoration: line-through; color: var(--text-subtle); }
+.label-item:has(.label-menu input:checked) .label-body { opacity: 0.5; }
+.label-item .label-menu { position: absolute; top: 12px; right: 16px; }
+.label-body {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px;
+  padding: 4px 24px 24px 68px;
+}
+.label-field { min-width: 0; }
+.label-field label { display: block; margin-bottom: 4px; font-size: 12px; color: var(--text-muted); }
+.label-field-name { grid-row: 1; grid-column: 1; }
+.label-field-emoji { grid-row: 1; grid-column: 2; }
+.label-field-include { grid-row: 2; grid-column: 1; }
+.label-field-exclude { grid-row: 2; grid-column: 2; }
+.label-field-sublabels { grid-row: 3; grid-column: 1; }
+.label-hint { margin: 4px 0 0; font-size: 12px; color: var(--text-subtle); }
+/* Boxes grow with their text up to about 6 lines, then scroll. */
+.label-body textarea { min-height: 32px; max-height: 160px; resize: vertical; overflow-y: auto; }
+.label-field.has-error input, .label-field.has-error textarea, .label-field.has-error select { border-color: var(--danger); }
 .label-footer {
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
   padding: 16px 24px; border-top: 1px solid var(--border);
 }
-.label-footer p { margin: 0; max-width: 560px; }
+
+/* Icon picker: an emoji text box, and a button that opens emoji-picker-element in a popover */
+.icon-picker { position: relative; display: flex; gap: 8px; }
+.icon-picker input[type="text"] { flex: none; width: 72px; text-align: center; font-size: 16px; }
+.emoji-popover {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  overflow: hidden; border-radius: var(--radius-lg); box-shadow: var(--shadow);
+}
+.emoji-popover[hidden] { display: none; }
+emoji-picker {
+  width: min(352px, calc(100vw - 32px)); height: 360px;
+  --background: var(--surface); --border-color: var(--border);
+  --input-border-color: var(--border-strong); --input-font-color: var(--text);
+  --input-border-radius: var(--radius-sm); --outline-color: var(--focus-ring);
+  --indicator-color: var(--accent); --button-hover-background: var(--fill);
+  --button-active-background: var(--accent-soft); --category-font-color: var(--text-muted);
+}
+
+/* Menu: Ant Dropdown, opened by a ⋯ button */
+.menu { position: relative; }
+.menu > summary { list-style: none; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu[open] > summary { background: var(--fill); }
+.menu-list {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 10;
+  min-width: 160px; padding: 4px;
+  background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow);
+}
+.menu-list form { margin: 0; }
+.menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 12px;
+  font: inherit; font-size: 14px; line-height: 22px; text-align: left; white-space: nowrap;
+  color: var(--text); background: none; border: 0; border-radius: var(--radius-xs);
+  cursor: pointer; transition: background 0.2s;
+}
+.menu-item:hover { background: var(--fill); }
+.menu-item:focus-visible, .menu-item:has(input:focus-visible) { outline: 2px solid var(--accent-text); outline-offset: -2px; }
+.menu-danger { color: var(--danger-text); }
+.menu-danger:hover { background: var(--danger-soft); }
+.menu-item input[type="checkbox"] { position: absolute; opacity: 0; pointer-events: none; }
+.menu-item .when-removed, .menu-item:has(input:checked) .when-kept { display: none; }
+.menu-item:has(input:checked) .when-removed { display: inline; }
+.menu-item:has(input:checked) { color: var(--text); }
 
 @media (max-width: 720px) {
-  .label-head { display: none; }
-  .label-row { grid-template-columns: 64px minmax(0, 1fr); padding: 16px; }
-  .label-cell-name { display: block; margin-bottom: 4px; font-size: 12px; color: var(--text-muted); }
-  .label-sublabels, .label-include, .label-exclude, .label-remove { grid-column: 1 / -1; }
+  .label-preview { display: none; }
+  .label-name { flex: 1; max-width: none; }
+  .label-summary { padding: 12px 56px 12px 16px; }
+  .label-item .label-menu { right: 12px; }
+  .label-body { grid-template-columns: minmax(0, 1fr); padding: 4px 16px 20px; }
+  .label-body .label-field { grid-row: auto; grid-column: auto; }
 }
 
 /* Switch: Ant Switch (44 x 22) */
@@ -356,6 +426,7 @@ input::placeholder, textarea::placeholder { color: var(--text-disabled); }
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
 .page-header h1 { margin-bottom: 4px; font-size: 24px; }
 .page-header p { margin: 0; }
+.page-header:has(> .menu) { flex-wrap: nowrap; align-items: flex-start; }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; }
 .stack { display: grid; gap: 24px; }
 /* Ant Descriptions, vertical */

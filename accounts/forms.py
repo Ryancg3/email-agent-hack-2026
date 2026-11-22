@@ -47,16 +47,26 @@ class SettingsForm(forms.ModelForm):
 
 
 
+class IconPicker(forms.TextInput):
+    """The emoji text box, plus a button that opens the full emoji picker (labels.html).
+    Gmail has no label icons, so the emoji goes in the label name."""
+
+    template_name = "accounts/widgets/icon_picker.html"
+
+    def __init__(self, attrs=None):
+        super().__init__({"maxlength": 16, "placeholder": "🏷️", "autocomplete": "off", **(attrs or {})})
+
+
 class LabelForm(forms.ModelForm):
     class Meta:
         model = Label
         fields = ("emoji", "name", "sublabels", "include", "exclude")
         labels = {
-            "emoji": "Emoji", "name": "Name", "sublabels": "Sub-labels",
+            "emoji": "Icon", "name": "Name", "sublabels": "Sub-labels",
             "include": "Belongs here", "exclude": "Doesn't belong",
         }
         widgets = {
-            "emoji": forms.TextInput(attrs={"placeholder": "🏷️"}),
+            "emoji": IconPicker,
             "name": forms.TextInput(attrs={"placeholder": "Label name"}),
             "sublabels": forms.Textarea(attrs={"rows": 1, "placeholder": "when useful"}),
             "include": forms.Textarea(attrs={"rows": 2}),
@@ -97,5 +107,5 @@ class BaseLabelFormSet(forms.BaseModelFormSet):
 
 LabelFormSet = forms.modelformset_factory(
     Label, form=LabelForm, formset=BaseLabelFormSet,
-    extra=1, can_delete=True, max_num=LABELS_MAX, validate_max=True,
+    extra=0, can_delete=True, max_num=LABELS_MAX, validate_max=True,
 )

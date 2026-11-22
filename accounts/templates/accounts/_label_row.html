@@ -1,0 +1,33 @@
+{# One label: a compact summary row that expands to edit. Remove lives in the ⋯ menu. #}
+<div class="label-item{% if form.errors %} has-errors{% endif %}">
+  <details class="label-details"{% if not form.instance.pk or form.errors %} open{% endif %}>
+    <summary class="label-summary">
+      <span class="label-icon" aria-hidden="true"><span class="label-emoji">{{ form.emoji.value|default:"" }}</span>{% include "accounts/_icon.html" with name="tag" class="icon-sm" %}</span>
+      <span class="label-name">{{ form.name.value|default:"New label" }}</span>
+      {% if form.not_in_gmail %}<span class="badge badge-schedule_time">Not in Gmail</span>{% endif %}
+      <span class="badge badge-instant label-removed">Removed on save</span>
+      <span class="label-preview">{{ form.include.value|default:"" }}</span>
+      {% include "accounts/_icon.html" with name="chevron" class="icon-sm label-chevron" %}
+    </summary>
+    <div class="label-body">
+      {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+      {% for field in form.visible_fields %}
+        {% if field.name != "DELETE" %}
+          <div class="label-field label-field-{{ field.name }}{% if field.errors %} has-error{% endif %}">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.name == "sublabels" %}<p class="label-hint">Blank: when useful. "never" turns them off.</p>{% endif %}
+            {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+          </div>
+        {% endif %}
+      {% endfor %}
+      {% for error in form.non_field_errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+    </div>
+  </details>
+  <details class="menu label-menu">
+    <summary class="btn btn-ghost btn-icon" aria-label="More actions" title="More actions">{% include "accounts/_icon.html" with name="more" class="icon-sm" %}</summary>
+    <div class="menu-list">
+      <label class="menu-item menu-danger">{{ form.DELETE }}<span class="when-kept">Remove label</span><span class="when-removed">Keep label</span></label>
+    </div>
+  </details>
+</div>

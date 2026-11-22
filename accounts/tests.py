@@ -379,6 +379,28 @@ class LabelsTabTests(TestCase):
         self.assertEqual(self.rows(), [("✈️", "Travel"), ("🧾", "Receipts")])
         self.assertEqual(self.user.labels.get(name="Travel").sublabels, "one per trip")
 
+    def test_icon_picker_sets_the_emoji(self, _):
+        self.user.labels.all().delete()
+        travel = Label.objects.create(user=self.user, emoji="✈️", name="Travel")
+        home = Label.objects.create(user=self.user, position=1, emoji="🏠", name="Home")
+        data = formset_data([
+            {"id": travel.pk, "emoji": " 🧑🏽‍💻 ", "name": "Travel"},  # any emoji, even multi-part ones
+            {"id": home.pk, "emoji": "", "name": "Home"},  # an empty box clears it
+        ], initial=2)
+        self.client.post(reverse("labels"), data)
+        self.assertEqual(self.rows(), [("🧑🏽‍💻", "Travel"), ("", "Home")])
+
+    def test_page_shows_each_label_as_a_collapsed_row(self, _):
+        self.user.labels.all().delete()
+        Label.objects.create(user=self.user, emoji="✈️", name="Travel", include="Flights.")
+        Label.objects.create(user=self.user, position=1, emoji="🦄", name="Work")
+        response = self.client.get(reverse("labels"))
+        self.assertContains(response, '<details class="label-details">', count=2)
+        self.assertContains(response, 'value="🦄"')
+        self.assertContains(response, "aria-haspopup=\"dialog\"", count=3)  # two rows and the new-row template
+        self.assertContains(response, "vendor/emoji-picker-element/index.js")
+        self.assertContains(response, "Reset to defaults")
+
     def test_rejects_duplicates_and_slashes(self, _):
         self.user.labels.all().delete()
         Label.objects.create(user=self.user, name="Mine")
