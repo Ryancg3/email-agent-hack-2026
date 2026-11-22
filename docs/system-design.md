@@ -105,7 +105,7 @@ Steps 1 to 3 are the **required minimum**: code always runs them, in that order,
 they happen even if Claude takes no extra steps. Step 4 is Claude's own choice and is
 often empty. The labels Claude may pick, and what each one is for, come from the
 user's label descriptions on the Labels page (new users start from
-[triage/labels.md](../agent/labels.md)).
+[triage/labels.md](../triage/labels.md)).
 
 `instant` is for the rare super-urgent email: a same-day deadline, a problem happening
 now, or someone blocked until the user answers. Event reminders and one-time or
