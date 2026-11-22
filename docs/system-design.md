@@ -238,10 +238,12 @@ sequenceDiagram
     Note over W,D: watch_renew_at = empty, so the scheduler starts the Gmail watch on its next tick
 ```
 
-Reconnecting the **same** account keeps the old `connected_at`, so the first run
-afterwards catches up on emails that arrived while it was disconnected (the newest 100
-inbox ids, 10 per run). Connecting a **different** account resets it, so that account's
-existing inbox is left alone.
+Reconnecting the **same** account after access expired or was revoked (the
+`reconnect_needed` case) keeps the old `connected_at`, so the first run afterwards
+catches up on emails that arrived in the gap (the newest 100 inbox ids, 10 per run).
+Connecting a **different** account resets it, so that account's existing inbox is left
+alone. Clicking **Disconnect** deletes the connection, so connecting again, even with
+the same account, starts a fresh `connected_at` and emails from the gap are skipped.
 
 The app only stores the **refresh token**, encrypted with Fernet. Each run builds fresh
 credentials from it. If Google refuses the token (expired or revoked), the run catches
