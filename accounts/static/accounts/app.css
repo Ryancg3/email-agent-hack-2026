@@ -292,19 +292,22 @@ input::placeholder, textarea::placeholder { color: var(--text-disabled); }
   padding: 16px 24px; border-top: 1px solid var(--border);
 }
 
-/* Icon picker: a dropdown of emoji, and a text box when "Custom" is picked */
-select {
-  height: 32px; padding: 4px 8px;
-  font: inherit; font-size: 14px; color: var(--text);
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-  cursor: pointer; transition: all 0.2s;
+/* Icon picker: an emoji text box, and a button that opens emoji-picker-element in a popover */
+.icon-picker { position: relative; display: flex; gap: 8px; }
+.icon-picker input[type="text"] { flex: none; width: 72px; text-align: center; font-size: 16px; }
+.emoji-popover {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  overflow: hidden; border-radius: var(--radius-lg); box-shadow: var(--shadow);
 }
-select:hover { border-color: var(--accent-hover); }
-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--focus-ring); }
-.icon-picker { display: flex; gap: 8px; }
-.icon-picker select { flex: none; min-width: 120px; font-size: 16px; }
-.icon-picker .icon-custom { display: none; flex: none; width: 72px; text-align: center; font-size: 16px; }
-.icon-picker:has(option[value="custom"]:checked) .icon-custom { display: block; }
+.emoji-popover[hidden] { display: none; }
+emoji-picker {
+  width: min(352px, calc(100vw - 32px)); height: 360px;
+  --background: var(--surface); --border-color: var(--border);
+  --input-border-color: var(--border-strong); --input-font-color: var(--text);
+  --input-border-radius: var(--radius-sm); --outline-color: var(--focus-ring);
+  --indicator-color: var(--accent); --button-hover-background: var(--fill);
+  --button-active-background: var(--accent-soft); --category-font-color: var(--text-muted);
+}
 
 /* Menu: Ant Dropdown, opened by a ⋯ button */
 .menu { position: relative; }

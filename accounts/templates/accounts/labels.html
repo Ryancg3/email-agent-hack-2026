@@ -1,4 +1,5 @@
 {% extends "accounts/base.html" %}
+{% load static %}
 {% block title %}Labels · Inbox Agent{% endblock %}
 {% block content %}
 <div class="container page">
@@ -47,6 +48,7 @@
         <p class="label-empty muted">No labels yet. Add one, or reset to the defaults.</p>
         {% for form in formset %}{% include "accounts/_label_row.html" %}{% endfor %}
       </div>
+      <div class="emoji-popover" id="emoji-popover" role="dialog" aria-label="Choose an emoji" hidden></div>
       <template id="label-template">{% include "accounts/_label_row.html" with form=formset.empty_form %}</template>
 
       <div class="label-footer">
@@ -77,9 +79,7 @@
 
     // Keep the summary row in step with what is typed in the expanded row.
     function sync(row) {
-      var choice = field(row, "emoji_choice"), custom = field(row, "emoji");
-      var emoji = choice.value === "custom" ? custom.value.trim() : choice.value;
-      row.querySelector(".label-emoji").textContent = emoji;
+      row.querySelector(".label-emoji").textContent = field(row, "emoji").value.trim();
       row.querySelector(".label-name").textContent = field(row, "name").value.trim() || "New label";
       row.querySelector(".label-preview").textContent = field(row, "include").value;
     }
@@ -103,6 +103,46 @@
       total.value = Number(index) + 1;
       field(list.lastElementChild, "name").focus();
     });
+
+    // The emoji picker: one shared popover, loaded on first use and moved next to the button clicked.
+    var popover = document.getElementById("emoji-popover"), picker = null, pickerFor = null;
+    function closePicker(refocus) {
+      if (popover.hidden) return;
+      popover.hidden = true;
+      if (refocus && pickerFor) pickerFor.parentNode.querySelector("[data-icon-picker]").focus();
+      pickerFor = null;
+    }
+    function openPicker(button) {
+      pickerFor = button.parentNode.querySelector("input");
+      button.parentNode.appendChild(popover);
+      popover.hidden = false;
+      if (picker) {
+        picker.className = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+        picker.shadowRoot.querySelector("input").focus();
+        return;
+      }
+      import("{% static 'accounts/vendor/emoji-picker-element/index.js' %}").then(function () {
+        picker = document.createElement("emoji-picker");
+        picker.dataSource = "{% static 'accounts/vendor/emoji-picker-element/data.json' %}";
+        picker.addEventListener("emoji-click", function (e) {
+          pickerFor.value = e.detail.unicode;
+          pickerFor.dispatchEvent(new Event("input", { bubbles: true }));
+          closePicker(true);
+        });
+        popover.appendChild(picker);
+        openPicker(button);
+      });
+    }
+    list.addEventListener("click", function (e) {
+      var button = e.target.closest("[data-icon-picker]");
+      if (!button) return;
+      if (!popover.hidden && popover.parentNode === button.parentNode) closePicker(false);
+      else openPicker(button);
+    });
+    document.addEventListener("click", function (e) {
+      if (!popover.contains(e.target) && !e.target.closest("[data-icon-picker]")) closePicker(false);
+    });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") closePicker(true); });
 
     // Close an open ⋯ menu on a click elsewhere, or on Escape.
     function closeMenus(except) {

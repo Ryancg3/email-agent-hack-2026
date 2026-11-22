@@ -47,38 +47,14 @@ class SettingsForm(forms.ModelForm):
 
 
 
-# The icon picker's emoji. Gmail has no label icons, so the emoji goes in the label name.
-ICONS = [
-    "✈️", "💳", "🧾", "💰", "💼", "👪", "🏠", "📰", "🛍️", "📦",
-    "📅", "🔔", "🔐", "🎓", "🩺", "⚖️", "🎉", "📚", "🚗", "⭐",
-]
-CUSTOM = "custom"
-
-
-class IconPicker(forms.Widget):
-    """A dropdown of ICONS, plus a text box for any other emoji when "Custom" is picked."""
+class IconPicker(forms.TextInput):
+    """The emoji text box, plus a button that opens the full emoji picker (labels.html).
+    Gmail has no label icons, so the emoji goes in the label name."""
 
     template_name = "accounts/widgets/icon_picker.html"
 
-    def get_context(self, name, value, attrs):
-        context = super().get_context(name, value, attrs)
-        value = value or ""
-        known = set(ICONS)
-        context["widget"].update(
-            icons=ICONS, custom=CUSTOM,
-            choice=value if value in known or not value else CUSTOM,
-            custom_value="" if value in known else value,
-        )
-        return context
-
-    def value_from_datadict(self, data, files, name):
-        choice = data.get(f"{name}_choice")
-        if choice is None or choice == CUSTOM:  # no dropdown posted: the text box is the value
-            return data.get(name, "").strip()
-        return choice
-
-    def value_omitted_from_data(self, data, files, name):
-        return name not in data and f"{name}_choice" not in data
+    def __init__(self, attrs=None):
+        super().__init__({"maxlength": 16, "placeholder": "🏷️", "autocomplete": "off", **(attrs or {})})
 
 
 class LabelForm(forms.ModelForm):

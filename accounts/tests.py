@@ -379,18 +379,13 @@ class LabelsTabTests(TestCase):
     def test_icon_picker_sets_the_emoji(self, _):
         self.user.labels.all().delete()
         travel = Label.objects.create(user=self.user, emoji="✈️", name="Travel")
-        work = Label.objects.create(user=self.user, position=1, emoji="🦄", name="Work")
-        home = Label.objects.create(user=self.user, position=2, emoji="🏠", name="Home")
+        home = Label.objects.create(user=self.user, position=1, emoji="🏠", name="Home")
         data = formset_data([
-            # Picked from the list: the custom box (hidden) is ignored.
-            {"id": travel.pk, "emoji_choice": "💳", "emoji": "🦄", "name": "Travel"},
-            # "Custom": the text box is the emoji.
-            {"id": work.pk, "emoji_choice": "custom", "emoji": " 🐙 ", "name": "Work"},
-            # "No icon" clears it.
-            {"id": home.pk, "emoji_choice": "", "emoji": "", "name": "Home"},
-        ], initial=3)
+            {"id": travel.pk, "emoji": " 🧑🏽‍💻 ", "name": "Travel"},  # any emoji, even multi-part ones
+            {"id": home.pk, "emoji": "", "name": "Home"},  # an empty box clears it
+        ], initial=2)
         self.client.post(reverse("labels"), data)
-        self.assertEqual(self.rows(), [("💳", "Travel"), ("🐙", "Work"), ("", "Home")])
+        self.assertEqual(self.rows(), [("🧑🏽‍💻", "Travel"), ("", "Home")])
 
     def test_page_shows_each_label_as_a_collapsed_row(self, _):
         self.user.labels.all().delete()
@@ -398,9 +393,9 @@ class LabelsTabTests(TestCase):
         Label.objects.create(user=self.user, position=1, emoji="🦄", name="Work")
         response = self.client.get(reverse("labels"))
         self.assertContains(response, '<details class="label-details">', count=2)
-        self.assertContains(response, '<option value="✈️" selected>')  # a listed icon
-        self.assertContains(response, '<option value="custom" selected>')  # any other emoji
         self.assertContains(response, 'value="🦄"')
+        self.assertContains(response, "aria-haspopup=\"dialog\"", count=3)  # two rows and the new-row template
+        self.assertContains(response, "vendor/emoji-picker-element/index.js")
         self.assertContains(response, "Reset to defaults")
 
     def test_rejects_duplicates_and_slashes(self, _):
