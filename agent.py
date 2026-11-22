@@ -14,9 +14,11 @@ from typing import Literal
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware, wrap_model_call
 from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import AIMessage
 from pydantic import BaseModel, create_model
 
 import actions
+import cost
 import gmail
 import labels
 import run_context
@@ -105,6 +107,8 @@ def ask(system: str, user: str, schema: type[BaseModel], max_tokens: int) -> Bas
     llm = ChatAnthropic(model=MODEL, max_tokens=max_tokens)
     structured = llm.with_structured_output(schema, method="json_schema", include_raw=True)
     out = structured.invoke([("system", system), ("human", user)])
+    # Before the refusal check: a refused call is billed too.
+    cost.record(MODEL, out["raw"].usage_metadata)
     if out["raw"].response_metadata.get("stop_reason") == "refusal":
         raise RuntimeError("Model refused")
     if out["parsing_error"]:
@@ -262,7 +266,11 @@ def act(email: Email, result, done: list[str]) -> None:
             one_tool_at_a_time,
         ],
     )
-    final = graph.invoke({"messages": [("human", user)]})["messages"][-1]
+    messages = graph.invoke({"messages": [("human", user)]})["messages"]
+    for message in messages:
+        if isinstance(message, AIMessage):
+            cost.record(MODEL, message.usage_metadata)
+    final = messages[-1]
     if final.response_metadata.get("stop_reason") == "refusal":
         raise RuntimeError("Model refused")
     print("[agent]", final.text)
