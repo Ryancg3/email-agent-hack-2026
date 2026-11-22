@@ -143,7 +143,8 @@ work in batches; urgent replies skip the grouping and take the first free time. 
 nothing fits in the next 5 days, the block is skipped and a line is printed to the
 scheduler log. The email is still saved as `ok`, so the dashboard doesn't show it.
 Emails more than 5 days old (`MAX_BLOCK_AGE` in `actions.py`) are never blocked, so
-rerunning the agent over old mail (`make agent N=200`) only labels it.
+rerunning the agent over old mail (`make agent N=200`) adds no reply time to the
+calendar. Labels and drafts are still applied as usual.
 
 Typical time per email: 10 to 30 seconds of Claude work (two or three calls, plus
 the tool loop).

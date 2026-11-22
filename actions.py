@@ -19,7 +19,8 @@ import labels
 MAX_LABELS = 3
 
 # Emails older than this never get a calendar block, so rerunning the agent over
-# old mail (make agent N=200, or a rerun from the dashboard) only labels it.
+# old mail (make agent N=200, or a rerun from the dashboard) adds no reply time.
+# Labels and drafts still apply.
 MAX_BLOCK_AGE = timedelta(days=5)
 
 
