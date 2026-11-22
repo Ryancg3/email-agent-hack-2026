@@ -158,7 +158,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .brand-mark {
   display: grid; place-items: center;
   width: 28px; height: 28px; border-radius: var(--radius-sm);
-  color: #fff; background: #1677ff;
+  color: var(--primary-text); background: var(--accent);  /* icon, not text: needs 3:1, has 4.1:1 */
 }
 .brand-mark .icon { width: 16px; height: 16px; }
 
