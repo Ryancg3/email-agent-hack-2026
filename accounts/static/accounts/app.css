@@ -308,6 +308,7 @@ input::placeholder, textarea::placeholder { color: var(--text-disabled); }
 .alert-error { --dot: var(--danger); background: var(--danger-soft); border-color: var(--danger-border); }
 .alert-warning { --dot: var(--warning); background: var(--warning-soft); border-color: var(--warning-border); }
 .alert-info { --dot: var(--info); background: var(--info-soft); border-color: var(--info-border); }
+.alert-action { flex: none; margin-left: auto; }
 
 /* Tags: Ant Tag with preset colors */
 .badge {

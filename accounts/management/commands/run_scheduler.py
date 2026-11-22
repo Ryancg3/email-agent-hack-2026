@@ -5,7 +5,7 @@ from django.core.management.base import BaseCommand
 from django.db.models import Q
 from django.utils import timezone
 
-from accounts import cleanup_runner, push, runner
+from accounts import cleanup_runner, push, reminder, runner
 from accounts.models import GoogleConnection, User
 
 INTERVAL = timedelta(minutes=5)
@@ -17,7 +17,8 @@ class Command(BaseCommand):
         "Run the agent for every enabled user every 5 minutes, and on 'Run now' "
         "(which reprocesses the user's newest emails). With Gmail push set up, run it "
         "seconds after an email arrives, and poll those users only every 30 minutes. "
-        "Run sub-label cleanup once a month, and on 'Clean up sub-labels'."
+        "Run sub-label cleanup once a month, and on 'Clean up sub-labels'. Remind "
+        "users to reconnect Google a day before Google signs the agent out."
     )
 
     def handle(self, *args, **options):
@@ -27,6 +28,8 @@ class Command(BaseCommand):
             if poll:
                 next_scheduled = timezone.now() + INTERVAL
             self.run_agents(poll)
+            if poll:  # every 5 minutes is plenty, and spaces out retries
+                reminder.send_due()
             push.renew_watches()
             self.clean_up_sublabels()
             time.sleep(POLL_SECONDS)

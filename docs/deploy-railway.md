@@ -85,6 +85,8 @@ the **Publishing status**:
 
 - **Testing:** Google expires refresh tokens after 7 days, so the agent would stop
   every week until you reconnect. Click **Publish app** to move it to **In production**.
+  If you stay in Testing, the app helps you keep up (see
+  [Staying connected in Testing mode](#staying-connected-in-testing-mode)).
 - **In production** without verification is fine for your own use. Google shows a
   "Google hasn't verified this app" screen when you connect. Click **Advanced**, then
   **Go to ... (unsafe)**, once.
@@ -120,14 +122,32 @@ Notes:
   scheduler picks up any missed emails on its next run.
 - Back up the database now and then from the volume's **Backups** tab.
 
+## Staying connected in Testing mode
+
+While the Google app is in Testing, Google signs the agent out 7 days after each
+connect or reconnect. Two things cover that, with no setup:
+
+- **Day 6 reminder email.** Six days after you last connected, the agent puts an email
+  titled "Reconnect Google to keep Inbox Agent running" in your inbox, with a link that
+  reconnects you. Reconnecting starts a new 7 days. The email is inserted into your
+  mailbox through the agent's own Gmail access, not sent, so it works while that access
+  is still valid. Deploy Logs show `[reminder] put a reconnect reminder in ...`.
+- **Red dashboard banner.** If Google signs the agent out anyway (you missed the
+  reminder, or revoked access), the dashboard shows "Google is disconnected" with a
+  **Reconnect Google** button. The agent skips you until you reconnect.
+
+Once the app is **In production** the 7-day limit no longer applies, but the reminder
+still arrives once per connect. Ignore it.
+
 ## Troubleshooting
 
 - **`Bad Request (400)`:** the host isn't allowed. With a custom domain, add the
   variable `APP_HOST` with that domain.
 - **Google says `redirect_uri_mismatch`:** the URI in step 5 must match exactly,
   including `https://` and the trailing slash.
-- **The agent stops after a week:** your OAuth app is still in Testing. See step 5,
-  then reconnect Google from the dashboard.
+- **The agent stops after a week:** your OAuth app is still in Testing. Reconnect from
+  the link in the day 6 reminder email or the dashboard banner, or publish the app
+  (step 5) to stop it for good.
 - **Deploy fails with `KeyError: 'TOKEN_KEY'`** (or another name): a variable from
   step 3 is missing.
 - **Data disappears after a deploy:** the volume isn't mounted at `/data`. See step 2.
