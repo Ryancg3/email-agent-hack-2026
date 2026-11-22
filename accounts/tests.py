@@ -698,6 +698,28 @@ class LangChainAgentTests(SimpleTestCase):
                 agent.ask("system", "user", agent.Reply, max_tokens=10)
 
 
+class BlockTimeAgeTests(SimpleTestCase):
+    """Old emails, as reached by rerunning the agent over the inbox, get no calendar block."""
+
+    def block(self, days_old):
+        received = datetime.now(timezone.utc) - timedelta(days=days_old)
+        with mock.patch.object(actions.gmail, "received_at", return_value=received), \
+                mock.patch.object(actions.gcal, "find_event_for_message", return_value=None), \
+                mock.patch.object(actions.gcal, "reply_slot", return_value=None) as reply_slot, \
+                mock.patch("builtins.print"):
+            outcome = actions.block_time("m1", "Reply to Bob", 15, "notes", urgent=True)
+        return outcome, reply_slot
+
+    def test_email_older_than_five_days_is_not_blocked(self):
+        outcome, reply_slot = self.block(days_old=6)
+        self.assertEqual(outcome, "not blocked: the email is 6 days old, older than 5 days")
+        reply_slot.assert_not_called()
+
+    def test_recent_email_still_looks_for_a_slot(self):
+        _, reply_slot = self.block(days_old=4)
+        reply_slot.assert_called_once_with(15, urgent=True)
+
+
 PUSH_SETTINGS = {"GMAIL_PUBSUB_TOPIC": "projects/p/topics/gmail", "GMAIL_PUSH_TOKEN": "secret"}
 
 

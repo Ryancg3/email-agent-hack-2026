@@ -87,6 +87,14 @@ def list_label_ids(label_id: str, limit: int = 500) -> list[str]:
     return [ref["id"] for ref in refs.get("messages", [])]
 
 
+def received_at(message_id: str) -> datetime:
+    """When Gmail received the message, in UTC."""
+    msg = _service().users().messages().get(
+        userId="me", id=message_id, format="minimal"
+    ).execute(num_retries=RETRIES)
+    return datetime.fromtimestamp(int(msg["internalDate"]) / 1000, timezone.utc)
+
+
 def get_summary(message_id: str) -> dict:
     """One message as {id, date, sender, subject, snippet}, without its body."""
     msg = _service().users().messages().get(
