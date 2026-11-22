@@ -376,6 +376,33 @@ class LabelsTabTests(TestCase):
         self.assertEqual(self.rows(), [("✈️", "Travel"), ("🧾", "Receipts")])
         self.assertEqual(self.user.labels.get(name="Travel").sublabels, "one per trip")
 
+    def test_icon_picker_sets_the_emoji(self, _):
+        self.user.labels.all().delete()
+        travel = Label.objects.create(user=self.user, emoji="✈️", name="Travel")
+        work = Label.objects.create(user=self.user, position=1, emoji="🦄", name="Work")
+        home = Label.objects.create(user=self.user, position=2, emoji="🏠", name="Home")
+        data = formset_data([
+            # Picked from the list: the custom box (hidden) is ignored.
+            {"id": travel.pk, "emoji_choice": "💳", "emoji": "🦄", "name": "Travel"},
+            # "Custom": the text box is the emoji.
+            {"id": work.pk, "emoji_choice": "custom", "emoji": " 🐙 ", "name": "Work"},
+            # "No icon" clears it.
+            {"id": home.pk, "emoji_choice": "", "emoji": "", "name": "Home"},
+        ], initial=3)
+        self.client.post(reverse("labels"), data)
+        self.assertEqual(self.rows(), [("💳", "Travel"), ("🐙", "Work"), ("", "Home")])
+
+    def test_page_shows_each_label_as_a_collapsed_row(self, _):
+        self.user.labels.all().delete()
+        Label.objects.create(user=self.user, emoji="✈️", name="Travel", include="Flights.")
+        Label.objects.create(user=self.user, position=1, emoji="🦄", name="Work")
+        response = self.client.get(reverse("labels"))
+        self.assertContains(response, '<details class="label-details">', count=2)
+        self.assertContains(response, '<option value="✈️" selected>')  # a listed icon
+        self.assertContains(response, '<option value="custom" selected>')  # any other emoji
+        self.assertContains(response, 'value="🦄"')
+        self.assertContains(response, "Reset to defaults")
+
     def test_rejects_duplicates_and_slashes(self, _):
         self.user.labels.all().delete()
         Label.objects.create(user=self.user, name="Mine")

@@ -47,16 +47,50 @@ class SettingsForm(forms.ModelForm):
 
 
 
+# The icon picker's emoji. Gmail has no label icons, so the emoji goes in the label name.
+ICONS = [
+    "✈️", "💳", "🧾", "💰", "💼", "👪", "🏠", "📰", "🛍️", "📦",
+    "📅", "🔔", "🔐", "🎓", "🩺", "⚖️", "🎉", "📚", "🚗", "⭐",
+]
+CUSTOM = "custom"
+
+
+class IconPicker(forms.Widget):
+    """A dropdown of ICONS, plus a text box for any other emoji when "Custom" is picked."""
+
+    template_name = "accounts/widgets/icon_picker.html"
+
+    def get_context(self, name, value, attrs):
+        context = super().get_context(name, value, attrs)
+        value = value or ""
+        known = set(ICONS)
+        context["widget"].update(
+            icons=ICONS, custom=CUSTOM,
+            choice=value if value in known or not value else CUSTOM,
+            custom_value="" if value in known else value,
+        )
+        return context
+
+    def value_from_datadict(self, data, files, name):
+        choice = data.get(f"{name}_choice")
+        if choice is None or choice == CUSTOM:  # no dropdown posted: the text box is the value
+            return data.get(name, "").strip()
+        return choice
+
+    def value_omitted_from_data(self, data, files, name):
+        return name not in data and f"{name}_choice" not in data
+
+
 class LabelForm(forms.ModelForm):
     class Meta:
         model = Label
         fields = ("emoji", "name", "sublabels", "include", "exclude")
         labels = {
-            "emoji": "Emoji", "name": "Name", "sublabels": "Sub-labels",
+            "emoji": "Icon", "name": "Name", "sublabels": "Sub-labels",
             "include": "Belongs here", "exclude": "Doesn't belong",
         }
         widgets = {
-            "emoji": forms.TextInput(attrs={"placeholder": "🏷️"}),
+            "emoji": IconPicker,
             "name": forms.TextInput(attrs={"placeholder": "Label name"}),
             "sublabels": forms.Textarea(attrs={"rows": 1, "placeholder": "when useful"}),
             "include": forms.Textarea(attrs={"rows": 2}),
@@ -93,5 +127,5 @@ class BaseLabelFormSet(forms.BaseModelFormSet):
 
 LabelFormSet = forms.modelformset_factory(
     Label, form=LabelForm, formset=BaseLabelFormSet,
-    extra=1, can_delete=True, max_num=LABELS_MAX, validate_max=True,
+    extra=0, can_delete=True, max_num=LABELS_MAX, validate_max=True,
 )

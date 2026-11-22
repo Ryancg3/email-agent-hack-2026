@@ -1,0 +1,9 @@
+<span class="icon-picker">
+  <select name="{{ widget.name }}_choice" id="{{ widget.attrs.id }}" aria-label="Icon">
+    <option value=""{% if not widget.choice %} selected{% endif %}>No icon</option>
+    {% for emoji in widget.icons %}<option value="{{ emoji }}"{% if widget.choice == emoji %} selected{% endif %}>{{ emoji }}</option>
+    {% endfor %}<option value="{{ widget.custom }}"{% if widget.choice == widget.custom %} selected{% endif %}>Custom…</option>
+  </select>
+  <input type="text" class="icon-custom" name="{{ widget.name }}" value="{{ widget.custom_value }}"
+         maxlength="16" placeholder="🏷️" aria-label="Custom emoji">
+</span>

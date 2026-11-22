@@ -8,6 +8,15 @@
       <h1>Labels</h1>
       <p class="muted">What each of your Gmail labels is for. The agent reads these to file your email.</p>
     </div>
+    <details class="menu">
+      <summary class="btn btn-ghost btn-icon" aria-label="More actions" title="More actions">{% include "accounts/_icon.html" with name="more" class="icon-sm" %}</summary>
+      <div class="menu-list">
+        <form method="post" action="{% url 'reset_labels' %}"
+              onsubmit="return confirm('Replace all your labels with the defaults?')">
+          {% csrf_token %}<button class="menu-item">Reset to defaults</button>
+        </form>
+      </div>
+    </details>
   </div>
 
   {% if problem %}
@@ -25,12 +34,8 @@
     <div class="card-header">
       <div>
         <h2 class="card-title">Label rules</h2>
-        <p class="card-subtitle">Describe what belongs in each label so the agent can file mail consistently.</p>
+        <p class="card-subtitle">Click a label to edit what belongs in it. Names match Gmail by letters only.</p>
       </div>
-      <form method="post" action="{% url 'reset_labels' %}"
-            onsubmit="return confirm('Replace all your labels with the defaults?')">
-        {% csrf_token %}<button class="btn btn-ghost btn-sm">Reset to defaults</button>
-      </form>
     </div>
 
     <form method="post" action="{% url 'labels' %}" class="labels-form">
@@ -38,37 +43,16 @@
       {{ formset.management_form }}
       {% for error in formset.non_form_errors %}<p class="error-text label-errors">{{ error }}</p>{% endfor %}
 
-      <div class="label-row label-head" aria-hidden="true">
-        <span>Emoji</span><span>Name</span><span>Sub-labels</span>
-        <span>Belongs here</span><span>Doesn't belong</span><span></span>
+      <div class="label-list" id="label-list">
+        <p class="label-empty muted">No labels yet. Add one, or reset to the defaults.</p>
+        {% for form in formset %}{% include "accounts/_label_row.html" %}{% endfor %}
       </div>
-
-      {% for form in formset %}
-        <div class="label-row{% if not form.instance.pk %} label-new{% endif %}">
-          {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
-          {% for field in form.visible_fields %}
-            {% if field.name != "DELETE" %}
-              <div class="label-cell label-{{ field.name }}{% if field.errors %} has-error{% endif %}">
-                <span class="label-cell-name">{{ field.label }}</span>
-                {{ field }}
-                {% if field.name == "name" and form.not_in_gmail %}<span class="badge badge-schedule_time">Not in Gmail</span>{% endif %}
-                {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
-              </div>
-            {% endif %}
-          {% endfor %}
-          <div class="label-cell label-remove">
-            {% if form.instance.pk %}
-              <label class="remove-toggle" title="Remove this label">{{ form.DELETE }} Remove</label>
-            {% else %}
-              <span class="muted small">New</span>
-            {% endif %}
-          </div>
-          {% for error in form.non_field_errors %}<p class="field-error">{{ error }}</p>{% endfor %}
-        </div>
-      {% endfor %}
+      <template id="label-template">{% include "accounts/_label_row.html" with form=formset.empty_form %}</template>
 
       <div class="label-footer">
-        <p class="muted small">Fill in the empty last row to add a label. Sub-labels "never" turns them off; blank means when useful. The labels themselves come from Gmail; names match by letters only.</p>
+        <button type="button" class="btn btn-secondary" id="add-label">
+          {% include "accounts/_icon.html" with name="plus" class="icon-sm" %} Add label
+        </button>
         <button type="submit" class="btn btn-primary">Save labels</button>
       </div>
     </form>
@@ -76,14 +60,63 @@
 
 </div>
 <script>
-  // Grow the description boxes to fit their text, again once fonts and layout settle.
-  var boxes = document.querySelectorAll(".label-row textarea");
-  function fit(box) { box.style.height = "auto"; box.style.height = box.scrollHeight + 2 + "px"; }
-  function fitAll() { boxes.forEach(fit); }
-  boxes.forEach(function (box) { box.addEventListener("input", function () { fit(box); }); });
-  fitAll();
-  window.addEventListener("load", fitAll);
-  window.addEventListener("resize", fitAll);
-  if (document.fonts) document.fonts.ready.then(fitAll);
+  (function () {
+    var list = document.getElementById("label-list");
+    var total = document.getElementById("id_labels-TOTAL_FORMS");
+    var template = document.getElementById("label-template");
+
+    // Grow the description boxes to fit their text. Boxes in a closed row have no size yet.
+    function fit(box) {
+      if (!box.offsetParent) return;
+      box.style.height = "auto";
+      box.style.height = box.scrollHeight + 2 + "px";
+    }
+    function fitAll(root) { (root || list).querySelectorAll("textarea").forEach(fit); }
+
+    function field(row, suffix) { return row.querySelector('[name$="-' + suffix + '"]'); }
+
+    // Keep the summary row in step with what is typed in the expanded row.
+    function sync(row) {
+      var choice = field(row, "emoji_choice"), custom = field(row, "emoji");
+      var emoji = choice.value === "custom" ? custom.value.trim() : choice.value;
+      row.querySelector(".label-emoji").textContent = emoji;
+      row.querySelector(".label-name").textContent = field(row, "name").value.trim() || "New label";
+      row.querySelector(".label-preview").textContent = field(row, "include").value;
+    }
+
+    list.addEventListener("input", function (e) {
+      if (e.target.tagName === "TEXTAREA") fit(e.target);
+      var row = e.target.closest(".label-item");
+      if (row) sync(row);
+    });
+    list.addEventListener("change", function (e) {
+      if (e.target.name && e.target.name.endsWith("-DELETE")) e.target.closest("details.menu").open = false;
+      var row = e.target.closest(".label-item");
+      if (row) sync(row);
+    });
+    // "toggle" doesn't bubble, so listen while it travels down.
+    list.addEventListener("toggle", function (e) { if (e.target.open) fitAll(e.target); }, true);
+
+    document.getElementById("add-label").addEventListener("click", function () {
+      var index = total.value;
+      list.insertAdjacentHTML("beforeend", template.innerHTML.replace(/__prefix__/g, index));
+      total.value = Number(index) + 1;
+      field(list.lastElementChild, "name").focus();
+    });
+
+    // Close an open ⋯ menu on a click elsewhere, or on Escape.
+    function closeMenus(except) {
+      document.querySelectorAll("details.menu[open]").forEach(function (menu) {
+        if (!menu.contains(except)) menu.open = false;
+      });
+    }
+    document.addEventListener("click", function (e) { closeMenus(e.target); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenus(null); });
+
+    fitAll();
+    window.addEventListener("load", function () { fitAll(); });
+    window.addEventListener("resize", function () { fitAll(); });
+    if (document.fonts) document.fonts.ready.then(function () { fitAll(); });
+  })();
 </script>
 {% endblock %}
