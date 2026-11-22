@@ -88,6 +88,8 @@ def renew_watches() -> None:
             connection.watch_error = ""
         except Exception as e:
             log.warning("gmail watch failed for %s: %s", connection.google_email, e)
+            # Assume push is down, so the 5-minute poll takes over and the dashboard says so.
+            connection.watch_expires_at = None
             connection.watch_renew_at = now + RETRY_AFTER
             connection.watch_error = f"Instant processing is off, polling instead: {e}"
         connection.save(update_fields=["watch_expires_at", "watch_renew_at", "watch_error"])

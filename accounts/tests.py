@@ -699,10 +699,12 @@ class GmailWatchRenewalTests(TestCase):
         self.assertAlmostEqual(connection.watch_renew_at - django_timezone.now(), push.RENEW_EVERY, delta=timedelta(minutes=1))
 
     def test_failure_is_shown_and_retried_in_an_hour(self, _):
+        GoogleConnection.objects.update(watch_expires_at=django_timezone.now() + timedelta(days=6))
         with mock.patch.object(push.gmail, "watch_inbox", side_effect=RuntimeError("topic not found")):
             push.renew_watches()
         connection = GoogleConnection.objects.get()
         self.assertIn("topic not found", connection.watch_error)
+        self.assertIsNone(connection.watch_expires_at)  # back to polling every 5 minutes
         self.assertAlmostEqual(connection.watch_renew_at - django_timezone.now(), push.RETRY_AFTER, delta=timedelta(minutes=1))
 
     def test_nothing_without_settings(self, _):
