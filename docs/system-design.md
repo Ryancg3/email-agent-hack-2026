@@ -214,7 +214,7 @@ sub-labels that have gone quiet, Claude decides keep or delete for each, and eac
 decision is saved as a `SublabelReview`. It only deletes when the user has turned
 cleanup on; otherwise it reports what it would delete. Its errors never touch the
 email agent's status, and the other way round. Details:
-[sublabel-cleanup-spec.md](sublabel-cleanup-spec.md).
+[archive/sublabel-cleanup-spec.md](archive/sublabel-cleanup-spec.md).
 
 ## Connecting a Google account
 
@@ -390,8 +390,8 @@ What breaks, what the user sees, what the app does about it, and how to fix it.
 
 ## Related docs
 
-- [agent_outline.md](../agent_outline.md): the agent's tools, skills, limits and guardrails.
 - [gmail-push.md](gmail-push.md): Google Cloud setup for push.
 - [deploy-railway.md](deploy-railway.md) and [deploy-render.md](deploy-render.md): hosting.
-- [sublabel-cleanup-spec.md](sublabel-cleanup-spec.md) and [user-labels-spec.md](user-labels-spec.md): feature specs.
+- [archive/](archive/): the first agent outline and the feature specs for sub-label
+  cleanup and per-user labels. Kept for history, no longer updated.
 - [../STACK.md](../STACK.md): libraries and versions.

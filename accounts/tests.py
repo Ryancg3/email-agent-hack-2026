@@ -263,7 +263,7 @@ class RunnerTests(TestCase):
             runner.run_user(self.user)
         self.assertEqual(seen, ["m2", "m3"])
         self.assertEqual(self.user.processed_emails.filter(status="ok").count(), 3)
-        self.assertEqual(self.user.processed_emails.get(message_id="m3").label_list, ["Work/Launch", "Team"])
+        self.assertEqual(self.user.processed_emails.get(message_id="m3").labels, "Work/Launch\nTeam")
         self.assertEqual(self.user.google.last_error, "")
 
     def test_run_now_reruns_the_newest_emails_even_if_done(self, _):

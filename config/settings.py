@@ -5,17 +5,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
-TUNNEL_HOST = "jul-implemented-webster-examination.trycloudflare.com"
-# Public hostname when deployed (e.g. email-agent.onrender.com); unset for local dev.
+# Public hostname when deployed (e.g. email-agent.onrender.com), or of a tunnel when
+# testing Gmail push locally; unset for plain local dev.
 # On Render and Railway it defaults to the hostname the platform assigns.
 APP_HOST = (
     os.environ.get("APP_HOST")
     or os.environ.get("RENDER_EXTERNAL_HOSTNAME")
     or os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
 )
-PUBLIC_HOSTS = [h for h in (TUNNEL_HOST, APP_HOST) if h]
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", *PUBLIC_HOSTS]
-CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in PUBLIC_HOSTS]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", *([APP_HOST] if APP_HOST else [])]
+CSRF_TRUSTED_ORIGINS = [f"https://{APP_HOST}"] if APP_HOST else []
 
 if APP_HOST:
     # Behind the host's HTTPS proxy: trust its scheme header, so the Google

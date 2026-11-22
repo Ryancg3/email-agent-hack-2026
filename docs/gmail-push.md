@@ -26,7 +26,9 @@ without calling Claude.
 ## What you need
 
 - The app reachable over public HTTPS (Render or Railway, or a Cloudflare tunnel when
-  testing locally), with its host in `ALLOWED_HOSTS`.
+  testing locally), with its host in `ALLOWED_HOSTS`. Render and Railway set this up
+  themselves. For a tunnel, set `APP_HOST` in `.env` to the tunnel's hostname and open
+  the app through the tunnel URL.
 - The Google Cloud project that owns your OAuth client. No new OAuth scope is needed:
   `gmail.modify` already allows `watch`, so users don't reconnect.
 
