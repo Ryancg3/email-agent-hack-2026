@@ -171,13 +171,14 @@ class DashboardStatusOverviewTests(TestCase):
     def test_shows_agent_google_run_count_and_delivery_status(self):
         self.user.google.last_run_at = django_timezone.now() - timedelta(minutes=10)
         self.user.google.save(update_fields=["last_run_at"])
+        today_start = django_timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         ProcessedEmail.objects.create(user=self.user, message_id="ok-today")
         ProcessedEmail.objects.create(
             user=self.user, message_id="failed-today", status=ProcessedEmail.Status.ERROR
         )
         old = ProcessedEmail.objects.create(user=self.user, message_id="ok-yesterday")
         ProcessedEmail.objects.filter(pk=old.pk).update(
-            processed_at=django_timezone.now() - timedelta(days=1)
+            processed_at=today_start - timedelta(microseconds=1)
         )
 
         response = self.client.get(reverse("dashboard"))
@@ -186,7 +187,7 @@ class DashboardStatusOverviewTests(TestCase):
         self.assertContains(response, "Active")
         self.assertContains(response, "Connected")
         self.assertContains(response, "Last run")
-        self.assertContains(response, "Handled today")
+        self.assertContains(response, "Handled today (UTC)")
         self.assertContains(response, '<span class="status-value">1</span>', html=True)
         self.assertContains(response, "Poll · every 5 minutes")
 
