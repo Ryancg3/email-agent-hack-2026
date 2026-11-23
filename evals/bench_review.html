@@ -117,12 +117,14 @@ function fillPickers() {
 // Claude calls vary from run to run and are shown as info, not counted as a difference.
 function actionKinds(r) {
   return (r.actions || []).filter(x => x.action !== "set_label_color")
-    .map(x => x.action === "add_labels" ? `label:${(x.labels || []).join(",")}` : x.action === "create_label" ? `new:${x.name}` : x.action)
+    .map(x => x.action === "add_labels" ? `label:${[...(x.labels || [])].sort().join(",")}` : x.action === "create_label" ? `new:${x.name}` : x.action)
     .sort();
 }
 function decision(r) {
   const p = r.predicted || {};
-  return { labels: p.labels, urgency: p.urgency, needs_reply: p.needs_reply, draft: !!r.draft, actions: actionKinds(r).join("|") };
+  // Sorted, so "Work; Team" and "Team; Work" are the same decision; sub-labels stay attached.
+  const labels = (p.labels || "").split("; ").filter(Boolean).sort().join("; ");
+  return { labels, urgency: p.urgency, needs_reply: p.needs_reply, draft: !!r.draft, actions: actionKinds(r).join("|") };
 }
 function differsIn(a, b, field) {
   return !!(a && b) && decision(a)[field] !== decision(b)[field];
@@ -195,6 +197,7 @@ function runHead(folder) {
       r.folder === prod ? el("span", { className: "badge prod", textContent: "PROD" }) : null,
       r.tags && r.tags.includes("live code") ? el("span", { className: "badge live", textContent: "live code", title: "Same models and loop rule as the code now" }) : null),
     el("div", { className: "muted small", textContent: r.folder }),
+    el("div", { className: "muted small", textContent: "Scores graded against your answers as they are now" }),
     el("div", { className: "stats" },
       el("span", { textContent: "All right" }), el("span", { textContent: `${pct(r.all_right)} (real inbox ${pct(r.all_right_real_inbox)})` }),
       el("span", { textContent: "Urgent caught" }), el("span", { textContent: pct(r.urgent_caught) }),
@@ -285,11 +288,15 @@ function move(step) {
   if (next) select(next.id);
 }
 
+let latestPair = "";
 async function loadCompare() {
-  const a = $("run-a").value, b = $("run-b").value;
+  const a = $("run-a").value, b = $("run-b").value, pair = `${a}|${b}`;
+  latestPair = pair;
   location.hash = `a=${a}&b=${b}`;
   const res = await fetch(`/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
-  emails = (await res.json()).emails || [];
+  const data = await res.json();
+  if (pair !== latestPair) return;  // the pickers changed while this loaded: a newer request wins
+  emails = data.emails || [];
   render();
 }
 

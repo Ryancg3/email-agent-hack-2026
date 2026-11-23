@@ -1714,7 +1714,8 @@ class BenchReviewTests(SimpleTestCase):
                 "name": folder.split("-", 2)[2], "run": folder[:15], "emails": 1, "errors": 0,
                 **{f"model_{k}": v for k, v in models.items()}, "dollars_per_email_real_inbox": 0.002}))
             (self.dir / folder / "results.jsonl").write_text(record("a", labels))
-        answers = [{"id": "a", "labels": "Jobs", "urgency": "not_urgent", "needs_reply": "no", "notes": "", "date": "d", "account": "me"}]
+        answers = [{"id": "a", "sender": "x <x@x.com>", "sender_emails": "1", "labels": "Jobs", "urgency": "not_urgent",
+                    "needs_reply": "no", "notes": "", "date": "d", "account": "me"}]
         for patcher in (
             mock.patch.multiple(eval_bench, BENCH_DIR=self.dir, PROD_FILE=self.dir / "prod.json"),
             mock.patch.object(eval_bench_review, "BENCH_DIR", self.dir),
@@ -1739,6 +1740,10 @@ class BenchReviewTests(SimpleTestCase):
         self.assertEqual(emails[0]["answer"]["labels"], "Jobs")
         self.assertFalse(emails[0]["a"]["correct"]["labels"])
         self.assertTrue(emails[0]["b"]["correct"]["labels"])
+
+    def test_scores_use_your_answers_now_like_the_rows(self):
+        scores = {r["name"]: r["all_right"] for r in eval_bench_review.runs()}
+        self.assertEqual(scores, {"old": 0, "current": 100})  # the answer is "Jobs"
 
     def test_only_saved_runs_can_be_read(self):
         with self.assertRaises(ValueError):

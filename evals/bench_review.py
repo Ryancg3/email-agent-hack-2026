@@ -21,18 +21,24 @@ from urllib.parse import parse_qs, urlparse
 
 from . import review
 from .localhost import is_local_request
-from .bench import BENCH_DIR, prod_run, run_folders, set_prod, with_derived
+from .bench import BENCH_DIR, prod_run, run_folders, set_prod, summarize, with_derived
 from .export import EMAILS_FILE
 from .run import grade
 
 PAGE = Path(__file__).parent / "bench_review.html"
 
 
+ACCURACY = ("all_right", "all_right_real_inbox", "labels", "urgency", "urgent_caught", "replies_caught")
+
+
 def runs() -> list[dict]:
-    """Every saved run, newest first, with the fields the run picker shows."""
-    out = []
+    """Every saved run, newest first, with the fields the run picker shows. Accuracy is
+    graded against your answers as they are now, like the email rows; cost is as saved."""
+    out, answers = [], review.read_rows()
     for folder in reversed(run_folders()):
         s = with_derived({**json.loads((BENCH_DIR / folder / "summary.json").read_text()), "folder": folder})
+        now = summarize(s["name"], {}, list(results(folder).values()), answers, None)
+        s.update({k: now[k] for k in ACCURACY})
         out.append({k: s.get(k) for k in (
             "folder", "name", "run", "tags", "emails", "all_right", "all_right_real_inbox", "labels", "urgency",
             "urgent_caught", "replies_caught", "drafts", "dollars_per_email_real_inbox", "emails_per_dollar",
