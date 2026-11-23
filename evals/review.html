@@ -245,26 +245,30 @@ function move(step) {
 }
 
 async function save({ done = true, advance = true } = {}) {
+  // The email being saved, fixed now: the reviewer may move on before the server answers.
+  const savedId = currentId;
   const labels = [...draft.labels];
+  const before = visibleRows();
   const response = await fetch("/api/save", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: currentId, labels, urgency: draft.urgency, needs_reply: draft.needs_reply, notes: draft.notes, done }),
+    body: JSON.stringify({ id: savedId, labels, urgency: draft.urgency, needs_reply: draft.needs_reply, notes: draft.notes, done }),
   });
   const result = await response.json();
-  if (!response.ok) { renderForm(); $("error").textContent = result.error; return; }
-  if (!advance) {
-    Object.assign(state.rows.find(r => r.id === currentId), result);
-    renderProgress(); renderList(); renderForm();
+  const stillHere = currentId === savedId;
+  if (!response.ok) {
+    if (stillHere) { renderForm(); $("error").textContent = result.error; }
+    else alert(`Not saved: ${result.error}`);
     return;
   }
-  // The next email in the current view, worked out before the saved one may drop out of it.
-  const before = visibleRows();
-  const i = before.findIndex(r => r.id === currentId);
-  Object.assign(state.rows.find(r => r.id === currentId), result);
+  Object.assign(state.rows.find(r => r.id === savedId), result);
+  renderProgress();
+  if (!stillHere) { renderList(); return; }  // the reviewer already moved on: just show the tick
+  if (!advance) { renderList(); renderForm(); return; }
+  // The next email after the saved one, among those still in view.
+  const i = before.findIndex(r => r.id === savedId);
   const after = visibleRows();
   const next = before.slice(i + 1).find(r => after.includes(r)) || after[0];
-  renderProgress();
   next ? select(next.id) : (currentId = null, renderList(), renderEmail());
 }
 

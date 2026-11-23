@@ -45,6 +45,7 @@ def pct(value) -> str:
 
 def summary_table(summaries: list[dict]) -> str:
     rows = [
+        ("Tags", lambda s: esc(s.get("tags") or "–")),
         ("Models", lambda s: f"classify {s['model_classify']}<br>draft {s['model_draft']}<br>agent loop {s['model_agent']}"
                              f"<br>loop runs {s.get('model_loop_runs', 'every email')}"
                              f"<br>emails dated {s.get('model_emails_dated', 'as received')}"),
@@ -121,7 +122,7 @@ def email_rows(runs: list[list[dict]], bodies: dict) -> str:
 
 
 def page(folders: list[Path]) -> str:
-    summaries = [with_derived(json.loads((f / "summary.json").read_text())) for f in folders]
+    summaries = [with_derived({**json.loads((f / "summary.json").read_text()), "folder": f.name}) for f in folders]
     runs = [[json.loads(line) for line in (f / "results.jsonl").read_text().splitlines()] for f in folders]
     bodies = {}
     if EMAILS_FILE.exists():

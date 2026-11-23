@@ -105,7 +105,8 @@ def block_time(message_id: str, title: str, minutes: int, notes: str, urgent: bo
     if age > MAX_BLOCK_AGE and not as_if_new:
         print(f"[action] not blocked, email is {age.days} days old: {title}")
         return f"not blocked: the email is {age.days} days old, older than {MAX_BLOCK_AGE.days} days"
-    if not as_if_new and (existing := gcal.find_event_for_message(message_id)):
+    # Treating the email as new ignores blocks from earlier live runs, not this run's own.
+    if existing := gcal.find_event_for_message(message_id, real=not as_if_new):
         if existing["status"] == "cancelled":
             return "not blocked: the user deleted the earlier block for this email"
         return f"already blocked {gcal.format_slot(gcal.event_slot(existing))}"

@@ -31,7 +31,7 @@ from langchain_core.callbacks import get_usage_metadata_callback
 from triage import pipeline, run_context
 
 from . import compare, review
-from .prices import dollars
+from .prices import dollars, require_prices
 from .export import address, label_names, load_emails, offline_context
 
 MODELS = {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
@@ -235,6 +235,7 @@ def main() -> None:
     parser.add_argument("--no-drafts", action="store_true", help="classify only, draft no replies")
     args = parser.parse_args()
     models = [MODELS.get(m, m) for m in (args.model or MODELS)]
+    require_prices(models + ([MODELS.get(args.draft_model, args.draft_model)] if args.draft_model else []))
 
     all_rows = review.read_rows()
     rows = [r for r in all_rows if r["checked"] == "yes"][: args.limit]

@@ -27,7 +27,7 @@ from triage import agent, gmail, google_auth, labels, pipeline, run_context
 
 from . import review
 from .export import DESCRIPTIONS_FILE, PROFILE_FILE
-from .prices import dollars
+from .prices import PRICES, dollars
 from .run import RUNS_DIR
 
 
@@ -62,7 +62,9 @@ class CallLog(BaseCallbackHandler):
         generation = response.generations[0][0] if response.generations and response.generations[0] else None
         message = getattr(generation, "message", None)
         usage = getattr(message, "usage_metadata", None) or {}
-        model = (getattr(message, "response_metadata", {}) or {}).get("model_name") or model
+        # The model the API reports; the requested one if that name has no price (e.g. a dated alias).
+        reported = (getattr(message, "response_metadata", {}) or {}).get("model_name")
+        model = reported if reported in PRICES else model
         call = {
             "step": step, "model": model,
             "input_tokens": usage.get("input_tokens", 0), "output_tokens": usage.get("output_tokens", 0),

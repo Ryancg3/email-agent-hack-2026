@@ -19,6 +19,8 @@ from pathlib import Path
 
 from triage import labels
 
+from .localhost import is_local_request
+
 from .export import ANSWER_COLUMNS, ANSWERS_FILE, DESCRIPTIONS_FILE, EMAILS_FILE, LABELS_FILE
 
 PAGE = Path(__file__).parent / "review.html"
@@ -102,7 +104,16 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, status: int, value) -> None:
         self._send(status, json.dumps(value, ensure_ascii=False).encode(), "application/json")
 
+    def _refuse_foreign(self, write: bool = False) -> bool:
+        """Answer 403 to requests from other sites (see evals/localhost.py)."""
+        if is_local_request(self.headers, self.server.server_address[1], write):
+            return False
+        self._json(403, {"error": "only this page on 127.0.0.1 may use this server"})
+        return True
+
     def do_GET(self):
+        if self._refuse_foreign():
+            return
         if self.path == "/":
             self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/api/data":
@@ -111,6 +122,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
     def do_POST(self):
+        if self._refuse_foreign(write=True):
+            return
         if self.path != "/api/save":
             return self._json(404, {"error": "not found"})
         try:

@@ -43,14 +43,16 @@ def message_url(message_id: str) -> str:
 def list_labels() -> list[dict]:
     """User-created labels only (no INBOX, SPAM, CATEGORY_*, ...)."""
     labels = _service().users().labels().list(userId="me").execute(num_retries=RETRIES)["labels"]
-    return [label for label in labels if label["type"] == "user"]
+    # A dry run's own new sub-labels, so the next email reuses them as it would live.
+    made = [{"id": DRY_RUN_ID + w["name"], "name": w["name"], "type": "user"} for w in run_context.simulated("create_label")]
+    return [label for label in labels if label["type"] == "user"] + made
 
 
 def add_labels(message_id: str, label_ids: list[str]) -> None:
     if run_context.current().dry_run:
         names = {label["id"]: label["name"] for label in list_labels()}
         run_context.skip_write(
-            "add_labels", message_id=message_id,
+            "add_labels", message_id=message_id, label_ids=label_ids,
             labels=[names.get(i, i.removeprefix(DRY_RUN_ID)) for i in label_ids],
         )
         return
@@ -63,7 +65,8 @@ def get_label_ids(message_id: str) -> list[str]:
     msg = _service().users().messages().get(
         userId="me", id=message_id, format="minimal"
     ).execute(num_retries=RETRIES)
-    return msg.get("labelIds", [])
+    added = [i for w in run_context.simulated("add_labels") if w["message_id"] == message_id for i in w["label_ids"]]
+    return msg.get("labelIds", []) + added
 
 
 def create_label(name: str, color: dict | None = None) -> str:
@@ -173,6 +176,8 @@ def list_newest(n: int) -> list[dict]:
 
 
 def thread_has_draft(thread_id: str) -> bool:
+    if any(w["thread_id"] == thread_id for w in run_context.simulated("create_reply_draft")):
+        return True
     drafts = _service().users().drafts().list(userId="me", maxResults=500).execute(num_retries=RETRIES)
     return any(d["message"]["threadId"] == thread_id for d in drafts.get("drafts", []))
 

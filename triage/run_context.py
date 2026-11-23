@@ -58,6 +58,13 @@ def current() -> RunContext:
     return _cli
 
 
+def simulated(action: str) -> list[dict]:
+    """The writes of one kind a dry run has recorded so far, so later reads can see
+    them as a live run would (none outside a dry run)."""
+    ctx = current()
+    return [w for w in ctx.would_do if w["action"] == action] if ctx.dry_run else []
+
+
 def skip_write(action: str, **details) -> bool:
     """In a dry run, record a write in would_do instead of doing it, and return
     True so the caller skips it. Outside a dry run, return False."""

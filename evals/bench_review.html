@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Benchmark review</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1d2129; --muted: #667085; --line: #e4e7ec;
+    --accent: #2156d9; --accent-soft: #e8efff; --ok: #157a4a; --bad: #c4320a; --diff: #b54708; --prod: #7a2ed9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111318; --panel: #1a1d24; --text: #e6e8ec; --muted: #98a2b3; --line: #2c313c;
+            --accent: #7aa2ff; --accent-soft: #1f2a44; --ok: #4ade80; --bad: #f87171; --diff: #fbbf24; --prod: #c4a1ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; }
+  select, input, button { font: inherit; color: inherit; }
+  select, input[type=search] { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .pick { display: flex; align-items: center; gap: 6px; }
+  .pick b { font-size: 12px; color: var(--muted); }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .count { color: var(--muted); margin-left: auto; }
+  .layout { display: grid; grid-template-columns: 280px minmax(320px, 1fr) 340px 340px; height: calc(100vh - 53px); }
+  .layout > * { overflow-y: auto; }
+  .list { border-right: 1px solid var(--line); background: var(--panel); }
+  .item { padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer; display: grid; grid-template-columns: 30px 1fr; gap: 6px; }
+  .item:hover { background: var(--bg); }
+  .item.active { background: var(--accent-soft); }
+  .dots { display: flex; gap: 3px; align-items: flex-start; padding-top: 5px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+  .subject, .sender { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sender { color: var(--muted); font-size: 12px; }
+  .differs { color: var(--diff); font-size: 11px; font-weight: 600; }
+  .email { padding: 18px 22px; }
+  .email h2 { margin: 0 0 8px; font-size: 18px; }
+  .meta { color: var(--muted); font-size: 13px; display: grid; grid-template-columns: 60px 1fr; gap: 2px 8px; margin-bottom: 12px; }
+  .meta a { color: var(--accent); }
+  .answer { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); margin-bottom: 12px; }
+  .answer h3, .run h3, .section h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .body, .draft { white-space: pre-wrap; word-break: break-word; font-size: 13px; }
+  .body { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .run { border-left: 1px solid var(--line); background: var(--panel); padding: 12px 14px; }
+  .run-head { border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 10px; }
+  .run-head .name { font-weight: 700; font-size: 15px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; margin-left: 4px; border: 1px solid currentColor; }
+  .badge.prod { color: var(--prod); } .badge.live { color: var(--ok); }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; font-size: 12px; margin: 6px 0; }
+  .stats span:nth-child(odd) { color: var(--muted); }
+  .models { font-size: 12px; color: var(--muted); }
+  .section { margin-bottom: 12px; padding-left: 8px; border-left: 3px solid transparent; }
+  .section.diff { border-left-color: var(--diff); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); font-weight: 600; }
+  .muted { color: var(--muted); } .small { font-size: 12px; }
+  .draft { border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+  table.calls { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.calls td { padding: 2px 4px; border-bottom: 1px solid var(--line); }
+  table.calls td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { padding: 40px; color: var(--muted); }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Benchmark review</h1>
+  <div class="pick"><b>A</b><select id="run-a"></select></div>
+  <button id="swap" title="Swap A and B">⇄</button>
+  <div class="pick"><b>B</b><select id="run-b"></select></div>
+  <select id="filter">
+    <option value="all">All emails</option>
+    <option value="differs">A and B disagree</option>
+    <option value="a-wrong">A wrong</option>
+    <option value="b-wrong">B wrong</option>
+    <option value="either-wrong">Either wrong</option>
+    <option value="draft">Has a draft</option>
+  </select>
+  <input id="search" type="search" placeholder="Search subject or sender">
+  <span class="count" id="count"></span>
+</header>
+<div class="layout">
+  <nav class="list" id="list"></nav>
+  <main class="email" id="email"></main>
+  <section class="run" id="col-a"></section>
+  <section class="run" id="col-b"></section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children.filter(c => c !== null && c !== undefined));
+  return node;
+};
+const pct = v => v === null || v === undefined ? "–" : `${Math.round(v)}%`;
+const money = (v, d = 4) => v === null || v === undefined ? "–" : `$${Number(v).toFixed(d)}`;
+
+let runs = [], prod = null, emails = [], currentId = null;
+
+function runLabel(r) {
+  const flags = [r.folder === prod ? "PROD" : "", r.tags && r.tags.includes("live code") ? "live code" : ""].filter(Boolean);
+  return `${r.name} · ${r.run.slice(4, 6)}/${r.run.slice(6, 8)} ${r.run.slice(9, 11)}:${r.run.slice(11, 13)}` + (flags.length ? ` · ${flags.join(", ")}` : "");
+}
+
+function fillPickers() {
+  for (const id of ["run-a", "run-b"]) {
+    const select = $(id), keep = select.value;
+    select.replaceChildren(...runs.map(r => el("option", { value: r.folder, textContent: runLabel(r) })));
+    if (keep && runs.some(r => r.folder === keep)) select.value = keep;
+  }
+}
+
+// What each run decided. Draft wording, block times, minutes to reply and the
+// Claude calls vary from run to run and are shown as info, not counted as a difference.
+function actionKinds(r) {
+  return (r.actions || []).filter(x => x.action !== "set_label_color")
+    .map(x => x.action === "add_labels" ? `label:${(x.labels || []).join(",")}` : x.action === "create_label" ? `new:${x.name}` : x.action)
+    .sort();
+}
+function decision(r) {
+  const p = r.predicted || {};
+  return { labels: p.labels, urgency: p.urgency, needs_reply: p.needs_reply, draft: !!r.draft, actions: actionKinds(r).join("|") };
+}
+function differsIn(a, b, field) {
+  return !!(a && b) && decision(a)[field] !== decision(b)[field];
+}
+function sameOutput(a, b) {
+  if (!a || !b) return false;
+  return JSON.stringify(decision(a)) === JSON.stringify(decision(b));
+}
+
+function visible() {
+  const filter = $("filter").value, q = $("search").value.toLowerCase();
+  return emails.filter(e => {
+    const aWrong = e.a && !e.a.correct.all, bWrong = e.b && !e.b.correct.all;
+    if (filter === "differs" && sameOutput(e.a, e.b)) return false;
+    if (filter === "a-wrong" && !aWrong) return false;
+    if (filter === "b-wrong" && !bWrong) return false;
+    if (filter === "either-wrong" && !aWrong && !bWrong) return false;
+    if (filter === "draft" && !((e.a && e.a.draft) || (e.b && e.b.draft))) return false;
+    return !q || `${e.subject} ${e.sender}`.toLowerCase().includes(q);
+  });
+}
+
+function dot(rec) {
+  return el("span", { className: "dot" + (rec ? (rec.correct.all ? " ok" : " bad") : ""), title: rec ? (rec.correct.all ? "all right" : "something differs from your answer") : "not in this run" });
+}
+
+function renderList() {
+  const shown = visible();
+  $("count").textContent = `${shown.length} of ${emails.length} emails`;
+  $("list").replaceChildren(...shown.map(e => {
+    const item = el("div", { className: "item" + (e.id === currentId ? " active" : "") },
+      el("div", { className: "dots" }, dot(e.a), dot(e.b)),
+      el("div", {},
+        el("div", { className: "subject", textContent: e.subject || "(no subject)" }),
+        el("div", { className: "sender", textContent: e.sender }),
+        sameOutput(e.a, e.b) ? null : el("div", { className: "differs", textContent: "A and B differ" })));
+    item.onclick = () => select(e.id);
+    return item;
+  }));
+  $("list").querySelector(".active")?.scrollIntoView({ block: "nearest" });
+}
+
+function renderEmail(e) {
+  const meta = el("div", { className: "meta" });
+  for (const [k, v] of [["From", e.sender], ["To", e.to], ["Cc", e.cc], ["Date", e.date], ["Account", e.account]]) {
+    if (v) meta.append(el("span", { textContent: k }), el("span", { textContent: v }));
+  }
+  if (e.account) meta.append(el("span"), el("span", {}, el("a", { href: `https://mail.google.com/mail/?authuser=${encodeURIComponent(e.account)}#all/${e.id}`, target: "_blank", rel: "noopener", textContent: "Open in Gmail ↗" })));
+  const a = e.answer;
+  const answer = el("div", { className: "answer" },
+    el("h3", { textContent: "Your answer" }),
+    el("div", { textContent: `Labels: ${a.labels || "no label"}` }),
+    el("div", { textContent: `Urgency: ${a.urgency || "–"} · Needs reply: ${a.needs_reply || "–"}` }),
+    a.notes ? el("div", { className: "muted small", textContent: `Notes: ${a.notes}` }) : null);
+  $("email").replaceChildren(el("h2", { textContent: e.subject || "(no subject)" }), meta, answer,
+    el("div", { className: "body", textContent: e.body || "(no body saved)" }));
+  $("email").scrollTop = 0;
+}
+
+function runHead(folder) {
+  const r = runs.find(x => x.folder === folder);
+  if (!r) return el("div");
+  const button = el("button", { textContent: r.folder === prod ? "This is prod" : "Flag as prod", disabled: r.folder === prod });
+  button.onclick = async () => {
+    const res = await fetch("/api/prod", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run: r.folder }) });
+    if (res.ok) { prod = (await res.json()).prod; await loadRuns(false); render(); }
+  };
+  return el("div", { className: "run-head" },
+    el("div", {}, el("span", { className: "name", textContent: r.name }),
+      r.folder === prod ? el("span", { className: "badge prod", textContent: "PROD" }) : null,
+      r.tags && r.tags.includes("live code") ? el("span", { className: "badge live", textContent: "live code", title: "Same models and loop rule as the code now" }) : null),
+    el("div", { className: "muted small", textContent: r.folder }),
+    el("div", { className: "stats" },
+      el("span", { textContent: "All right" }), el("span", { textContent: `${pct(r.all_right)} (real inbox ${pct(r.all_right_real_inbox)})` }),
+      el("span", { textContent: "Urgent caught" }), el("span", { textContent: pct(r.urgent_caught) }),
+      el("span", { textContent: "Replies caught" }), el("span", { textContent: pct(r.replies_caught) }),
+      el("span", { textContent: "$/email" }), el("span", { textContent: money(r.dollars_per_email_real_inbox) }),
+      el("span", { textContent: "Emails per $1" }), el("span", { textContent: r.emails_per_dollar ? Math.round(r.emails_per_dollar).toLocaleString() : "–" }),
+      el("span", { textContent: "$/month" }), el("span", { textContent: money(r.dollars_per_month, 2) })),
+    el("div", { className: "models", innerHTML: "" },
+      el("div", { textContent: `classify ${r.model_classify} · draft ${r.model_draft}` }),
+      el("div", { textContent: `agent loop ${r.model_agent}, runs ${r.model_loop_runs || "every email"}` }),
+      el("div", { textContent: `emails dated ${r.model_emails_dated || "as received"}` })),
+    button);
+}
+
+function section(title, differs, ...content) {
+  return el("div", { className: "section" + (differs ? " diff" : ""), title: differs ? "A different decision from the other run" : "" },
+    el("h4", { textContent: title }), ...content);
+}
+
+function describe(action) {
+  if (action.action === "add_labels") return `Label: ${(action.labels || []).join(", ")}`;
+  if (action.action === "create_label") return `New sub-label: ${action.name}`;
+  if (action.action === "set_label_color") return "Recolour a sub-label";
+  if (action.action === "create_event") {
+    const start = new Date(action.start), end = new Date(action.end);
+    const day = start.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+    const time = d => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return `Calendar block ${day} ${time(start)}–${time(end)}: ${action.title}`;
+  }
+  return action.action;
+}
+
+function renderRun(colId, folder, rec, other) {
+  const col = $(colId);
+  const head = runHead(folder);
+  if (!rec) { col.replaceChildren(head, el("div", { className: "empty", textContent: "Not in this run." })); return; }
+  if (!rec.predicted) { col.replaceChildren(head, el("div", { className: "bad", textContent: `Error: ${rec.error}` })); return; }
+  const p = rec.predicted;
+  const labels = p.labels ? p.labels.split("; ").map(n => {
+    const [top, ...sub] = n.split("/");
+    return el("div", {}, top, sub.length ? el("span", { className: "muted", textContent: ` / ${sub.join("/")}` }) : null);
+  }) : [el("span", { className: "muted", textContent: "no label" })];
+  const mark = good => good ? "ok" : "bad";
+  const actions = (rec.actions || []).filter(a => a.action !== "set_label_color");
+  const calls = el("table", { className: "calls" }, ...rec.calls.map(c => el("tr", {},
+    el("td", { textContent: c.step }), el("td", { className: "muted", textContent: c.model.replace("claude-", "") }),
+    el("td", { className: "n", textContent: `${c.input_tokens.toLocaleString()}/${c.output_tokens.toLocaleString()}` }),
+    el("td", { className: "n", textContent: money(c.dollars, 5) }))));
+  col.replaceChildren(head,
+    section("Labels", differsIn(rec, other, "labels"), el("div", { className: mark(rec.correct.labels) }, ...labels)),
+    section("Urgency", differsIn(rec, other, "urgency"),
+      el("div", { className: mark(rec.correct.urgency), textContent: `${p.urgency}` }),
+      el("div", { className: "muted small", textContent: `${p.minutes_needed} minutes to reply` })),
+    section("Needs reply", differsIn(rec, other, "needs_reply"), el("div", { className: mark(rec.correct.reply), textContent: p.needs_reply })),
+    section("Draft", differsIn(rec, other, "draft"),
+      rec.draft ? el("div", {},
+        el("div", { className: "muted small", textContent: `To ${rec.draft.to}${rec.draft.cc && rec.draft.cc.length ? `, cc ${rec.draft.cc.join(", ")}` : ""}` }),
+        el("div", { className: "draft", textContent: rec.draft.body }))
+        : el("div", { className: "muted", textContent: p.needs_reply === "yes" ? "no draft (the thread already had one)" : "no draft" })),
+    section("Would-be actions", differsIn(rec, other, "actions"),
+      ...(actions.length ? actions.map(a => el("div", { className: "small", textContent: describe(a) })) : [el("div", { className: "muted small", textContent: "none" })])),
+    section(`Claude calls · ${money(rec.dollars, 5)} · ${rec.seconds}s`, false, calls));
+}
+
+function select(id) {
+  currentId = id;
+  renderList();
+  const e = emails.find(x => x.id === id);
+  if (!e) {
+    $("email").replaceChildren(el("div", { className: "empty", textContent: "No emails in this view. Pick another filter." }));
+    $("col-a").replaceChildren(runHead($("run-a").value));
+    $("col-b").replaceChildren(runHead($("run-b").value));
+    return;
+  }
+  renderEmail(e);
+  renderRun("col-a", $("run-a").value, e.a, e.b);
+  renderRun("col-b", $("run-b").value, e.b, e.a);
+}
+
+function render() {
+  const shown = visible();
+  select(shown.some(e => e.id === currentId) ? currentId : (shown[0] && shown[0].id));
+}
+
+function move(step) {
+  const shown = visible(), i = shown.findIndex(e => e.id === currentId);
+  const next = shown[Math.min(Math.max(i + step, 0), shown.length - 1)];
+  if (next) select(next.id);
+}
+
+async function loadCompare() {
+  const a = $("run-a").value, b = $("run-b").value;
+  location.hash = `a=${a}&b=${b}`;
+  const res = await fetch(`/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
+  emails = (await res.json()).emails || [];
+  render();
+}
+
+async function loadRuns(pickDefaults) {
+  const data = await (await fetch("/api/runs")).json();
+  runs = data.runs; prod = data.prod;
+  fillPickers();
+  if (pickDefaults) {
+    const hash = Object.fromEntries(location.hash.slice(1).split("&").filter(Boolean).map(p => p.split("=")));
+    const has = f => runs.some(r => r.folder === f);
+    const a = has(hash.a) ? hash.a : (prod || (runs[1] || runs[0]).folder);
+    const b = has(hash.b) ? hash.b : (runs.find(r => r.folder !== a) || runs[0]).folder;
+    $("run-a").value = a; $("run-b").value = b;
+  }
+}
+
+$("run-a").onchange = $("run-b").onchange = loadCompare;
+$("swap").onclick = () => { const a = $("run-a").value; $("run-a").value = $("run-b").value; $("run-b").value = a; loadCompare(); };
+$("filter").onchange = $("search").oninput = render;
+document.addEventListener("keydown", e => {
+  if (["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName)) return;
+  if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); move(1); }
+  if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+});
+
+loadRuns(true).then(loadCompare);
+</script>
+</body>
+</html>

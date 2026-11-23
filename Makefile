@@ -2,7 +2,7 @@ RUN := uv run --env-file .env
 N ?= 5
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install migrate superuser dev web scheduler test agent cleanup slots eval-export eval-prefill eval-review eval eval-compare eval-trace eval-monthly bench bench-compare bench-list check-key
+.PHONY: help setup install migrate superuser dev web scheduler test agent cleanup slots eval-export eval-prefill eval-review eval eval-compare eval-trace eval-monthly bench bench-compare bench-list check-key bench-prod bench-review
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -95,3 +95,9 @@ bench-list: ## Benchmark: every saved run as a table
 
 check-key: .env ## Check which Anthropic credential is used and that it works (free)
 	$(RUN) python -m triage.llm
+
+bench-prod: ## Benchmark: flag a saved run as what runs in production (make bench-prod RUN=current)
+	uv run python -m evals.bench --prod $(RUN)
+
+bench-review: ## Benchmark: local page to compare two runs email by email (http://127.0.0.1:8766)
+	uv run python -m evals.bench_review

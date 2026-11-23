@@ -37,12 +37,14 @@ from triage import agent, pipeline, run_context
 from . import review
 from .export import label_names, load_emails
 from .monthly import VOLUME_FILE
-from .prices import dollars
+from .prices import dollars, require_prices
 from .run import MODELS, RUNS_DIR, URGENT, grade, share, weights
 from .trace import live_context, recording
 
 BENCH_DIR = RUNS_DIR / "bench"
 LEADERBOARD = BENCH_DIR / "leaderboard.csv"
+# Which saved run stands for what runs in production now: {"run": <folder name>}.
+PROD_FILE = BENCH_DIR / "prod.json"
 PARALLEL = 4  # each worker has its own Google clients; Gmail's quota allows about this many
 STEPS = ["classify", "draft reply", "agent loop"]
 
@@ -188,12 +190,58 @@ def save(summary: dict, records: list[dict], stamp: str) -> Path:
 
 
 def load_runs() -> list[dict]:
-    """Every saved benchmark's summary, oldest first."""
-    return [json.loads(p.read_text()) for p in sorted(BENCH_DIR.glob("*/summary.json"))]
+    """Every saved benchmark's summary, oldest first, with its folder name."""
+    return [{**json.loads(p.read_text()), "folder": p.parent.name} for p in sorted(BENCH_DIR.glob("*/summary.json"))]
+
+
+def run_folders() -> list[str]:
+    return [p.parent.name for p in sorted(BENCH_DIR.glob("*/summary.json"))]
+
+
+def find_run(wanted: str) -> str:
+    """A run's folder name, from the folder name or a system name (its newest run)."""
+    folders = run_folders()
+    if wanted in folders:
+        return wanted
+    named = [f for f in folders if json.loads((BENCH_DIR / f / "summary.json").read_text())["name"] == wanted]
+    if not named:
+        raise SystemExit(f"No benchmark run called {wanted}. Saved: {', '.join(folders) or 'none'}")
+    return named[-1]
+
+
+def prod_run() -> str | None:
+    """The folder of the run flagged as production, if it still exists."""
+    if not PROD_FILE.exists():
+        return None
+    folder = json.loads(PROD_FILE.read_text()).get("run")
+    return folder if folder in run_folders() else None
+
+
+def set_prod(wanted: str) -> str:
+    folder = find_run(wanted)
+    BENCH_DIR.mkdir(parents=True, exist_ok=True)
+    PROD_FILE.write_text(json.dumps({"run": folder, "set_at": datetime.now().isoformat(timespec="seconds")}))
+    return folder
+
+
+def matches_live(s: dict) -> bool:
+    """Whether a run used the same models and loop rule as the code does now."""
+    live = system()
+    return all(s.get(f"model_{k}") == v for k, v in live.items() if k != "emails_dated")
+
+
+def tags(s: dict) -> str:
+    """"prod" for the flagged run, "live code" for runs matching today's settings."""
+    out = []
+    if s.get("folder") and s["folder"] == prod_run():
+        out.append("prod")
+    if matches_live(s):
+        out.append("live code")
+    return ", ".join(out)
 
 
 COLUMNS = [
-    ("run", "Run", "{}"), ("name", "System", "{}"),
+    ("run", "Run", "{}"), ("name", "System", "{}"), ("tags", "Tags", "{}"),
     ("all_right", "All right", "{:.0f}%"), ("all_right_real_inbox", "Real inbox", "{:.0f}%"),
     ("labels", "Labels", "{:.0f}%"), ("urgency", "Urgency", "{:.0f}%"),
     ("urgent_caught", "Urgent caught", "{:.0f}%"), ("replies_caught", "Replies caught", "{:.0f}%"),
@@ -207,6 +255,7 @@ def with_derived(s: dict) -> dict:
     """Runs saved before a metric existed get it computed from what they stored."""
     if s.get("emails_per_dollar") is None and s.get("dollars_per_email_real_inbox"):
         s = {**s, "emails_per_dollar": 1 / s["dollars_per_email_real_inbox"]}
+    s = {**s, "tags": tags(s)}
     return s
 
 
@@ -275,14 +324,19 @@ def main() -> None:
     parser.add_argument("--limit", type=int, help="only the first N checked emails")
     parser.add_argument("--yes", action="store_true", help="don't ask before spending")
     parser.add_argument("--list", action="store_true", help="show every saved benchmark and stop")
+    parser.add_argument("--prod", metavar="RUN", help="flag a saved run (folder or system name) as production")
     args = parser.parse_args()
 
+    if args.prod:
+        print(f"Production run: {set_prod(args.prod)}")
+        return
     if args.list:
         runs = load_runs()
         print(table(runs) if runs else "No benchmarks yet. Run make bench.")
         return
 
     models = system(args.classify, args.draft, args.agent, args.loop_always or None)
+    require_prices([models["classify"], models["draft"], models["agent"]])
     rows = [r for r in review.read_rows() if r["checked"] == "yes"][: args.limit]
     if not rows:
         raise SystemExit("No checked answers yet. Check some with make eval-review first.")

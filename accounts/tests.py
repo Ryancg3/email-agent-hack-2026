@@ -26,6 +26,7 @@ from evals import review as eval_review
 from evals import run as eval_run
 from evals import bench as eval_bench
 from evals import bench_compare as eval_bench_compare
+from evals import bench_review as eval_bench_review
 from evals import compare as eval_compare
 from evals import monthly as eval_monthly
 from evals import prices as eval_prices
@@ -1153,7 +1154,7 @@ class DryRunTests(SimpleTestCase):
         self.assertEqual(record["email"]["subject"], "Launch")
         self.assertNotIn("body", record["email"])
         self.assertEqual(record["classification"], {"urgency": "not_urgent"})
-        self.assertEqual(record["would_do"], [{"action": "add_labels", "message_id": "m1", "labels": ["Work"]}])
+        self.assertEqual(record["would_do"], [{"action": "add_labels", "message_id": "m1", "label_ids": ["L1"], "labels": ["Work"]}])
         self.gmail_api.assert_not_called()
 
 
@@ -1620,7 +1621,8 @@ class AsIfNewTests(SimpleTestCase):
         with run_context.use(run_context.RunContext(None, dry_run=True, as_if_new=as_if_new)), \
                 mock.patch.object(actions.gmail, "received_at", return_value=datetime.now(timezone.utc) - timedelta(days=12)), \
                 mock.patch.object(actions.gmail, "message_url", return_value="u"), \
-                mock.patch.object(actions.gcal, "find_event_for_message", return_value={"status": "confirmed"}), \
+                mock.patch.object(actions.gcal, "find_event_for_message",  # a block from an earlier live run
+                                  side_effect=lambda message_id, real=True: {"status": "confirmed"} if real else None), \
                 mock.patch.object(actions.gcal, "reply_slot", return_value=(slot, None)), \
                 mock.patch.object(actions.gcal, "format_slot", return_value="Mon 10:00"), \
                 mock.patch("builtins.print"):
@@ -1690,3 +1692,127 @@ class CredentialTests(SimpleTestCase):
     def test_a_bearer_token_in_the_api_key_variable_is_sent_as_one(self):
         client = self.anthropic_client({"ANTHROPIC_API_KEY": "sk-ant-usr-x"})
         self.assertEqual(client._custom_headers.get("Authorization"), "Bearer sk-ant-usr-x")
+
+
+
+class BenchReviewTests(SimpleTestCase):
+    """The prod flag and the two-run comparison page's data."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        live = eval_bench.system()
+        def record(i, labels, draft=None):
+            return json.dumps({"id": i, "subject": f"s{i}", "sender": "x", "expected": {}, "error": None,
+                               "predicted": {"labels": labels, "urgency": "not_urgent", "needs_reply": "no", "minutes_needed": 5},
+                               "correct": {}, "draft": draft, "actions": [], "calls": [], "dollars": 0.001, "seconds": 1})
+        for folder, models, labels in (("20261123-000001-old", {**live, "loop_runs": "every email"}, "News"),
+                                       ("20261123-000002-current", live, "Jobs")):
+            (self.dir / folder).mkdir()
+            (self.dir / folder / "summary.json").write_text(json.dumps({
+                "name": folder.split("-", 2)[2], "run": folder[:15], "emails": 1, "errors": 0,
+                **{f"model_{k}": v for k, v in models.items()}, "dollars_per_email_real_inbox": 0.002}))
+            (self.dir / folder / "results.jsonl").write_text(record("a", labels))
+        answers = [{"id": "a", "labels": "Jobs", "urgency": "not_urgent", "needs_reply": "no", "notes": "", "date": "d", "account": "me"}]
+        for patcher in (
+            mock.patch.multiple(eval_bench, BENCH_DIR=self.dir, PROD_FILE=self.dir / "prod.json"),
+            mock.patch.object(eval_bench_review, "BENCH_DIR", self.dir),
+            mock.patch.object(eval_bench_review, "EMAILS_FILE", self.dir / "none.jsonl"),
+            mock.patch.object(eval_bench_review.review, "read_rows", return_value=answers),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_prod_flag_by_name_and_tags(self):
+        self.assertIsNone(eval_bench.prod_run())
+        self.assertEqual(eval_bench.set_prod("old"), "20261123-000001-old")
+        tags = {s["name"]: eval_bench.tags(s) for s in eval_bench.load_runs()}
+        self.assertEqual(tags, {"old": "prod", "current": "live code"})
+        self.assertIn("prod", eval_bench.table(eval_bench.load_runs()))
+        with self.assertRaises(SystemExit):
+            eval_bench.set_prod("nope")
+
+    def test_compare_grades_both_runs_against_your_answers_now(self):
+        emails = eval_bench_review.compare("20261123-000001-old", "20261123-000002-current")["emails"]
+        self.assertEqual(len(emails), 1)
+        self.assertEqual(emails[0]["answer"]["labels"], "Jobs")
+        self.assertFalse(emails[0]["a"]["correct"]["labels"])
+        self.assertTrue(emails[0]["b"]["correct"]["labels"])
+
+    def test_only_saved_runs_can_be_read(self):
+        with self.assertRaises(ValueError):
+            eval_bench_review.results("../../eval_data")
+
+    def test_runs_list_newest_first_and_page_exists(self):
+        self.assertEqual([r["name"] for r in eval_bench_review.runs()], ["current", "old"])
+        self.assertTrue(eval_bench_review.PAGE.exists())
+
+
+
+class DryRunMemoryTests(SimpleTestCase):
+    """A dry run sees its own simulated writes, as a live run would see the real ones."""
+
+    def setUp(self):
+        self.ctx = run_context.RunContext(None, dry_run=True)
+        token = run_context._current.set(self.ctx)
+        self.addCleanup(run_context._current.reset, token)
+        api = mock.Mock()
+        api.users().labels().list().execute.return_value = {"labels": [{"id": "L1", "name": "Work", "type": "user"}]}
+        api.users().messages().get().execute.return_value = {"labelIds": ["INBOX"]}
+        api.users().drafts().list().execute.return_value = {"drafts": []}
+        calendar = mock.Mock()
+        calendar.events().list().execute.return_value = {"items": []}
+        for patcher in (mock.patch("triage.gmail._service", return_value=api),
+                        mock.patch("triage.gcal._service", return_value=calendar)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_labels_and_drafts(self):
+        from triage import gmail
+        label_id = gmail.create_label("Work/Launch")
+        gmail.add_labels("m1", ["L1", label_id])
+        self.assertIn("Work/Launch", [label["name"] for label in gmail.list_labels()])
+        self.assertEqual(gmail.get_label_ids("m1"), ["INBOX", "L1", label_id])
+        self.assertFalse(gmail.thread_has_draft("t1"))
+        gmail.create_reply_draft({"thread_id": "t1", "subject": "Hi"}, "ada@x.com", [], "Hello")
+        self.assertTrue(gmail.thread_has_draft("t1"))  # a second email in the thread gets no paid draft
+
+    def test_calendar_blocks(self):
+        from triage import gcal
+        start, end = datetime(2026, 11, 24, 10, tzinfo=timezone.utc), datetime(2026, 11, 24, 10, 15, tzinfo=timezone.utc)
+        gcal.create_event("Reply", (start, end), "notes", "m1", "url")
+        self.assertEqual(len(gcal._events(start - timedelta(hours=1), end + timedelta(hours=1))), 1)  # next block avoids it
+        self.assertEqual(len(gcal._events(end + timedelta(hours=1), end + timedelta(hours=2))), 0)
+        self.assertIsNotNone(gcal.find_event_for_message("m1", real=False))
+        self.assertIsNone(gcal.find_event_for_message("m2", real=False))
+
+    def test_nothing_is_remembered_outside_a_dry_run(self):
+        self.ctx.dry_run = False
+        self.ctx.would_do.append({"action": "create_reply_draft", "thread_id": "t1"})
+        self.assertEqual(run_context.simulated("create_reply_draft"), [])
+
+
+
+class PriceTests(SimpleTestCase):
+    def test_unpriced_models_are_refused_before_spending_and_never_cost_zero(self):
+        eval_prices.require_prices(["claude-haiku-5-5", "none"])
+        with self.assertRaises(SystemExit):
+            eval_prices.require_prices(["claude-haiku-5-5", "claude-new-model"])
+        with self.assertRaises(KeyError):
+            eval_prices.dollars("claude-new-model", 1000, 100)
+        with mock.patch("sys.argv", ["bench", "--classify", "claude-new-model", "--yes"]), \
+                mock.patch.object(eval_bench, "run_one") as run_one, self.assertRaises(SystemExit):
+            eval_bench.main()
+        run_one.assert_not_called()
+
+
+class LocalPageGuardTests(SimpleTestCase):
+    def test_only_this_server_as_host_and_origin(self):
+        from evals.localhost import is_local_request
+        self.assertTrue(is_local_request({"Host": "127.0.0.1:8765"}, 8765))
+        self.assertTrue(is_local_request({"Host": "localhost:8765"}, 8765))
+        self.assertFalse(is_local_request({"Host": "evil.example:8765"}, 8765))  # DNS rebinding
+        self.assertFalse(is_local_request({}, 8765))
+        self.assertTrue(is_local_request({"Host": "127.0.0.1:8765", "Origin": "http://127.0.0.1:8765"}, 8765, write=True))
+        self.assertFalse(is_local_request({"Host": "127.0.0.1:8765", "Origin": "http://evil.example"}, 8765, write=True))
