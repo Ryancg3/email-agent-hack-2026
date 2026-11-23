@@ -227,6 +227,11 @@ def create_event(title: str, slot: Slot, description: str, message_id: str, sour
     """Create an event in the primary calendar, tagged with the Gmail message
     it is for, and return its link."""
     start, end = slot
+    if run_context.skip_write(
+        "create_event", message_id=message_id, title=title,
+        start=start.isoformat(), end=end.isoformat(), description=description,
+    ):
+        return "(dry run: no event created)"
     event = _service().events().insert(calendarId="primary", body={
         "summary": title,
         "description": description,

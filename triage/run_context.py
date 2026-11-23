@@ -26,6 +26,12 @@ class RunContext:
     last_name: str = "Doe"
     # The user's labels, as labels.parse gives them; None (the CLI) reads labels.md from the repo.
     labels: dict[str, dict] | None = None
+    # Eval mode: every Gmail and Calendar write is recorded in would_do instead of done.
+    dry_run: bool = False
+    would_do: list[dict] = field(default_factory=list)
+    # Eval only: treat every email as just received, so old test emails still get calendar
+    # blocks (no age limit, no earlier block found) and the loop runs as it would live.
+    as_if_new: bool = False
     _memo: dict[str, Any] = field(default_factory=dict)
 
     def cached(self, key: str, compute: Callable[[], Any]) -> Any:
@@ -50,6 +56,15 @@ def current() -> RunContext:
 
         _cli = RunContext(google_auth.credentials())
     return _cli
+
+
+def skip_write(action: str, **details) -> bool:
+    """In a dry run, record a write in would_do instead of doing it, and return
+    True so the caller skips it. Outside a dry run, return False."""
+    ctx = current()
+    if ctx.dry_run:
+        ctx.would_do.append({"action": action, **details})
+    return ctx.dry_run
 
 
 @contextmanager

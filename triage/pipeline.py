@@ -3,10 +3,14 @@ runs the required actions for that urgency, drafts a reply when one is needed,
 then hands over to the agent (agent.py) to take more.
 
 Usage:
-    python -m triage.pipeline [N]    # process the newest N inbox emails (default 5)
+    python -m triage.pipeline [N]              # process the newest N inbox emails (default 5)
+    python -m triage.pipeline N --dry-run      # eval mode: change nothing, save the would-be actions
 """
 
+import argparse
+import json
 import sys
+from datetime import datetime
 from email.utils import parseaddr
 from pathlib import Path
 from typing import Literal
@@ -19,9 +23,20 @@ from . import gmail
 from . import labels
 from . import run_context
 from .agent import MODEL, act
+from .llm import chat_model
 
+# Classifying runs on Haiku: in the SHY-12 eval (175 emails) it matched Sonnet on
+# labels and urgency at about 1/16 of the cost. Drafts and the tool loop stay on MODEL.
+CLASSIFY_MODEL = "claude-haiku-5-5"
+DRAFT_MODEL = MODEL
+# The agent loop (Sonnet, up to 5 calls) runs only when something is left to act on:
+# a reply, or time to block in the calendar. For the rest (newsletters, receipts,
+# alerts) the fixed steps have already applied the labels and sub-labels, and the
+# loop almost always ends with "nothing more needed". False runs it on every email.
+SKIP_IDLE_LOOP = True
 DEFAULT_COUNT = 5
 SKILLS_DIR = Path(__file__).parent / "skills"
+EVAL_RUNS_DIR = Path(__file__).parent.parent / "eval_runs"
 
 Urgency = Literal["not_urgent", "schedule_time", "instant"]
 
@@ -102,9 +117,9 @@ def label_menu(label_names: list[str]) -> tuple[list[str], str]:
     return top, "\n".join(lines)
 
 
-def ask(system: str, user: str, schema: type[BaseModel], max_tokens: int) -> BaseModel:
+def ask(system: str, user: str, schema: type[BaseModel], max_tokens: int, model: str | None = None) -> BaseModel:
     """One Claude call that returns `schema`, using Claude's native structured output."""
-    llm = ChatAnthropic(model=MODEL, max_tokens=max_tokens)
+    llm = chat_model(model or DRAFT_MODEL, max_tokens)
     structured = llm.with_structured_output(schema, method="json_schema", include_raw=True)
     out = structured.invoke([("system", system), ("human", user)])
     if out["raw"].response_metadata.get("stop_reason") == "refusal":
@@ -114,10 +129,13 @@ def ask(system: str, user: str, schema: type[BaseModel], max_tokens: int) -> Bas
     return out["parsed"]
 
 
-def classify(email: Email, label_names: list[str]) -> BaseModel:
+def classify(email: Email, label_names: list[str], model: str | None = None) -> BaseModel:
+    """model is only passed by the eval; otherwise CLASSIFY_MODEL, read at call time
+    so a benchmark can swap it."""
+    model = model or CLASSIFY_MODEL
     top, menu = label_menu(label_names)
     user = f"Allowed labels:\n{menu}\n\nEmail:\n" + email.model_dump_json(indent=2)
-    return ask(SYSTEM_PROMPT, user, result_model(top), max_tokens=1024)
+    return ask(SYSTEM_PROMPT, user, result_model(top), max_tokens=1024, model=model)
 
 
 def pick_labels(result) -> list[tuple[str, str | None]]:
@@ -208,13 +226,15 @@ def run_required(email: Email, result) -> list[str]:
     return done
 
 
-def write_reply(email: Email, result, done: list[str]) -> Reply:
+def write_reply(email: Email, result, done: list[str], model: str | None = None) -> Reply:
+    """model is only passed by the eval; otherwise DRAFT_MODEL, read at call time."""
+    model = model or DRAFT_MODEL
     user = (
         f"Email:\n{email.model_dump_json(indent=2)}\n\n"
         f"Classification:\n{result.model_dump_json(indent=2)}\n\n"
         "Already done:\n" + ("\n".join(done) or "nothing")
     )
-    return ask(load_skill("write-reply"), user, Reply, max_tokens=4096)
+    return ask(load_skill("write-reply"), user, Reply, max_tokens=4096, model=model)
 
 
 def auto_draft(email: Email, result, done: list[str]) -> str:
@@ -228,17 +248,34 @@ def auto_draft(email: Email, result, done: list[str]) -> str:
     return f"draft_reply(message_id={email.id!r}, reply_all={reply.reply_all}) -> {outcome}"
 
 
+def needs_loop(result) -> bool:
+    """Whether the agent loop has anything to act on: a reply or calendar time."""
+    return result.needs_reply or result.urgency != "not_urgent"
+
+
 def run(email: Email, label_names: list[str]):
     result = classify(email, label_names)
     print(result.model_dump_json(indent=2))
 
     done = run_required(email, result)
-    act(email, result, done)
+    if needs_loop(result) or not SKIP_IDLE_LOOP:
+        act(email, result, done)
+    else:
+        print("[agent] skipped: no reply or calendar time needed")
     return result
 
 
 def main() -> None:
-    count = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_COUNT
+    parser = argparse.ArgumentParser(description="Process the newest inbox emails.")
+    parser.add_argument("count", nargs="?", type=int, default=DEFAULT_COUNT)
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="eval mode: change nothing in Gmail or Calendar, save what would have been done",
+    )
+    args = parser.parse_args()
+    ctx = run_context.current()
+    ctx.dry_run = args.dry_run
+
     label_names = [label["name"] for label in gmail.list_labels()]
     if not [name for name in label_names if "/" not in name]:
         sys.exit(
@@ -247,15 +284,37 @@ def main() -> None:
     for warning in labels.check(label_names):
         print(f"[labels] {warning}")
 
-    for message in gmail.list_newest(count):
+    log = None
+    if ctx.dry_run:
+        EVAL_RUNS_DIR.mkdir(exist_ok=True)
+        log = EVAL_RUNS_DIR / f"{datetime.now():%Y%m%d-%H%M%S}.jsonl"
+        print(f"[dry run] nothing in Gmail or Calendar changes; would-be actions go to {log}")
+
+    for message in gmail.list_newest(args.count):
         email = Email(**message)
         print(f"\n=== {email.subject} ({email.sender})")
+        first_write = len(ctx.would_do)
+        result, error = None, None
         try:
             # Read per email, so a sub-label made for one email is reused by the next.
             label_names = [label["name"] for label in gmail.list_labels()]
-            run(email, label_names)
+            result = run(email, label_names)
         except Exception as e:
+            error = str(e)
             print(f"[error] {email.id}: {e}")
+        if log:
+            record = {
+                "email": email.model_dump(exclude={"body"}),
+                "classification": result.model_dump() if result else None,
+                "would_do": ctx.would_do[first_write:],
+                "error": error,
+            }
+            # One line per email, written as it finishes, so a stopped run keeps what it did.
+            with log.open("a") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    if log:
+        print(f"\n[dry run] {len(ctx.would_do)} would-be writes saved to {log}")
 
 
 if __name__ == "__main__":

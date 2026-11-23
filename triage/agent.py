@@ -11,6 +11,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, wrap_model_cal
 from langchain_anthropic import ChatAnthropic
 
 from . import actions
+from .llm import chat_model
 
 if TYPE_CHECKING:
     from .pipeline import Email
@@ -33,7 +34,7 @@ def one_tool_at_a_time(request, handler):
 
 
 def act_model() -> ChatAnthropic:
-    return ChatAnthropic(model=MODEL, max_tokens=16000)
+    return chat_model(MODEL, 16000)
 
 
 def act(email: Email, result, done: list[str]) -> None:

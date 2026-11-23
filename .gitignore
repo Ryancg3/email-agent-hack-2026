@@ -7,3 +7,5 @@ app.db*
 db.sqlite3*
 .coverage
 staticfiles/
+eval_runs/
+eval_data/

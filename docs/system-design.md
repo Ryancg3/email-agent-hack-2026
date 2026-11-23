@@ -52,7 +52,7 @@ flowchart LR
         CAL["Calendar API"]
     end
 
-    ANT["Anthropic API<br/>claude-sonnet-5-5<br/>via LangChain"]
+    ANT["Anthropic API<br/>Haiku 5.5 classifies, Sonnet 5.5 drafts<br/>via LangChain"]
 
     U -- "HTTPS" --> WEB
     WEB -- "connect account" --> OAUTH
@@ -97,7 +97,7 @@ flowchart TD
     HAS -- "no" --> DRF["3. Draft reply (Claude)<br/>write-reply skill,<br/>saved as a Gmail draft"] --> ACT
     HAS -- "yes" --> ACT
     NR -- "no" --> ACT
-    ACT["4. Extra actions (Claude tool loop)<br/>at most 5 model calls, one tool at a time:<br/>apply_label, block_time,<br/>find_free_slots"]
+    ACT["4. Extra actions (Claude tool loop)<br/>only when a reply or calendar time is needed<br/>at most 5 model calls, one tool at a time:<br/>apply_label, block_time,<br/>find_free_slots"]
     ACT --> SAVE[("Save ProcessedEmail<br/>subject, labels, urgency, ok or error")]
 ```
 
