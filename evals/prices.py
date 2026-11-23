@@ -1,7 +1,9 @@
 """Claude list prices, for the eval's cost numbers."""
 
-# US dollars per 1M tokens (input, output), the list prices in cost.py from SHY-14
-# (PR #17), checked 2026-11-22. Switch to cost.PRICES once that PR is merged.
+# US dollars per 1M tokens (input, output), Anthropic API list prices, checked 2026-11-22.
+# Cost is measured in evals only, not on the dashboard (SHY-14).
+# Haiku 5.5 costs more above 100K input tokens per request; one email stays far below that.
+# The pipeline doesn't use prompt caching, so cache reads and writes have no price here.
 PRICES = {
     "claude-haiku-5-5": (0.10, 0.50),
     "claude-sonnet-5-5": (2.00, 10.00),
