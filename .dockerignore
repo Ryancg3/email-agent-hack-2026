@@ -7,3 +7,6 @@ credentials.json
 app.db*
 db.sqlite3*
 staticfiles
+eval_data
+eval_runs
+.context
