@@ -64,7 +64,14 @@ make dev        # web app on http://localhost:8000, plus the scheduler
 make agent N=3  # CLI: process the newest 3 emails (needs credentials.json)
 make agent N=50 DRY_RUN=1  # eval mode: changes nothing, saves the would-be actions to eval_runs/
 make test       # run the tests
+make demo       # web app with a fake Gmail, to try UI changes (see below)
 ```
+
+`make demo` runs the web app on http://localhost:8765 against an in-memory fake
+Gmail and its own `demo.db`, so no Google account is needed and nothing touches a
+real inbox. Log in with `demo@example.com` / `demo-password`, in a normal browser:
+Conductor's built-in browser drops the CSRF cookie. Details in
+[accounts/demo.py](accounts/demo.py).
 
 Run `make help` to see every command.
 

@@ -18,6 +18,7 @@ urlpatterns = [
     path("cleanup/", views.cleanup_now, name="cleanup_now"),
     path("labels/", views.labels_page, name="labels"),
     path("labels/add-missing/", views.add_missing_labels, name="add_missing_labels"),
+    path("labels/push/", views.push_missing_labels, name="push_missing_labels"),
     path("labels/reset/", views.reset_labels, name="reset_labels"),
     path("google/connect/", views.google_connect_start, name="google_connect"),
     path("google/callback/", views.google_callback, name="google_callback"),

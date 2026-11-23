@@ -2,7 +2,7 @@ RUN := uv run --env-file .env
 N ?= 5
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install migrate superuser dev web scheduler test agent cleanup slots check-key eval-export eval-review bench bench-review
+.PHONY: help setup install migrate superuser dev web scheduler test agent cleanup slots check-key eval-export eval-review bench bench-review labels demo
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -50,6 +50,12 @@ web: .env ## Run the web server on http://localhost:8000
 
 scheduler: .env ## Run the agent for all users every 5 minutes, and on "Run now"
 	$(RUN) python manage.py run_scheduler
+
+demo: .env ## Web app with a fake Gmail on http://localhost:8765 (demo@example.com / demo-password)
+	$(RUN) python -m accounts.demo
+
+labels: .env ## Create users' missing labels in Gmail (make labels EMAIL=you@x.com for one user)
+	$(RUN) python manage.py push_labels $(EMAIL)
 
 test: .env ## Run the tests
 	$(RUN) python manage.py test accounts

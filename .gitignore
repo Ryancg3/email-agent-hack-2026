@@ -5,6 +5,7 @@ token.json
 credentials.json
 app.db*
 db.sqlite3*
+demo.db*
 .coverage
 staticfiles/
 eval_runs/

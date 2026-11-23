@@ -116,6 +116,9 @@ class GoogleConnection(models.Model):
     watch_expires_at = models.DateTimeField(null=True, blank=True)
     watch_renew_at = models.DateTimeField(null=True, blank=True, help_text="Empty: renew now")
     watch_error = models.TextField(blank=True)
+    # Ids of the top-level Gmail labels seen so far, so a label made by hand in Gmail
+    # is imported once (see accounts/label_sync.py). Empty: not looked yet.
+    seen_label_ids = models.JSONField(null=True, blank=True)
 
 
 class ProcessedEmail(models.Model):
