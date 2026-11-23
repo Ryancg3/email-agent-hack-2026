@@ -59,7 +59,8 @@ def add_by_hand(request):
     if not name:
         return HttpResponse("Pass ?name=…", status=400)
     fake_create_label(name)
-    return HttpResponse(f"Added {name} to the fake Gmail. Reload the Labels tab.")
+    # Plain text: the name comes from the URL, so as HTML it could inject a script.
+    return HttpResponse(f"Added {name} to the fake Gmail. Reload the Labels tab.", content_type="text/plain")
 
 
 def main() -> None:

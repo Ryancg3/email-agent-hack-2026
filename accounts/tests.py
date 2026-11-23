@@ -36,7 +36,7 @@ from triage import labels
 from triage import run_context
 from triage import sublabel_cleanup
 
-from . import cleanup_runner, google_connect, push, reminder, runner
+from . import cleanup_runner, google_connect, label_sync, push, reminder, runner
 from .management.commands import run_scheduler
 from .forms import LABELS_MAX
 from .models import GoogleConnection, Label, ProcessedEmail, SublabelReview, User
@@ -546,6 +546,24 @@ class LabelsTabTests(TestCase):
         with mock.patch.object(runner.gmail, "list_inbox_ids", return_value=[]):
             runner.run_user(user)
         self.assertEqual(self.rows(), [("", "Hobbies")])
+
+    def test_an_older_gmail_list_keeps_the_ids_already_seen(self, _):
+        GoogleConnection.objects.filter(user=self.user).update(seen_label_ids=["L1", "L3", "L5"])
+        older = [{"id": "L1", "name": "✈️ Travel"}, {"id": "L3", "name": "Hobbies"}]  # fetched before L5 existed
+        label_sync.import_from_gmail(self.user, older)
+        self.assertEqual(GoogleConnection.objects.get(user=self.user).seen_label_ids, ["L1", "L3", "L5"])
+
+    def test_a_name_too_long_for_the_editor_isnt_imported(self, _):
+        self.user.labels.all().delete()
+        Label.objects.create(user=self.user, emoji="✈️", name="Travel")
+        self.client.get(reverse("labels"))  # first look
+        long_name = "Receipts " * 8  # over 60 characters
+        self.list_labels.return_value.append({"id": "L5", "name": long_name})
+        self.client.get(reverse("labels"))
+        self.assertEqual(self.rows(), [("✈️", "Travel")])
+        response = self.client.post(reverse("add_missing_labels"), follow=True)
+        self.assertEqual(self.rows(), [("✈️", "Travel"), ("", "Hobbies")])
+        self.assertContains(response, "Too long for a label name (60 characters at most), so not added")
 
     def test_push_labels_command(self, _):
         self.user.labels.all().delete()

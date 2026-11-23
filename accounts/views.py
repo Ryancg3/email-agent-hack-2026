@@ -213,17 +213,26 @@ def add_missing_labels(request):
     labels_now = user_labels(request.user)
     described = {labels.key(label.name) for label in labels_now}
     position = max((label.position for label in labels_now), default=-1) + 1
-    added, skipped = [], 0
+    added, skipped, too_long = [], 0, []
     for name in gmail_names:
         if "/" in name or labels.key(name) in described:
             continue
         described.add(labels.key(name))
+        emoji, plain = labels.split_emoji(name)
+        if not label_sync.fits(emoji, plain):
+            too_long.append(name)
+            continue
         if len(labels_now) + len(added) >= LABELS_MAX:
             skipped += 1
             continue
-        emoji, plain = labels.split_emoji(name)
         added.append(Label(user=request.user, position=position + len(added), emoji=emoji, name=plain))
     Label.objects.bulk_create(added)
+    if too_long:
+        max_length = Label._meta.get_field("name").max_length
+        messages.error(request, f"Too long for a label name ({max_length} characters at most), so not added: "
+                                f"{', '.join(too_long)}. Shorten them in Gmail first.")
+    if not added and too_long and not skipped:
+        return redirect("labels")
     if not added and skipped:
         messages.error(request, f"You can have at most {LABELS_MAX} labels. Delete one to add another.")
         return redirect("labels")

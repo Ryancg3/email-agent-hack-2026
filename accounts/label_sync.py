@@ -10,6 +10,8 @@ it looked, so deleting a row doesn't bring it back while its Gmail label stays.
 Renaming or deleting never changes the other side.
 """
 
+from django.db import transaction
+
 from triage import gmail
 from triage import labels
 from triage import run_context
@@ -37,35 +39,48 @@ def gmail_label_names(user: User) -> tuple[list[str] | None, str]:
     return (None if found is None else [label["name"] for label in found]), problem
 
 
+def fits(emoji: str, name: str) -> bool:
+    """Whether the editor can hold this emoji and name; longer ones would make
+    every later save of the Labels tab fail."""
+    return (len(emoji) <= Label._meta.get_field("emoji").max_length
+            and len(name) <= Label._meta.get_field("name").max_length)
+
+
 def import_from_gmail(user: User, found: list[dict]) -> list[str]:
     """Add a row for each top-level Gmail label that is new since the last look
     and not described yet. Returns the imported names. The first look only takes
-    note of what's there: older undescribed labels stay with the "Add them" button."""
-    connection = user.google
-    # The scheduler loads users up front, so a long run before this one can leave
-    # the cached value stale; a stale list would re-import a row deleted meanwhile.
-    connection.refresh_from_db(fields=["seen_label_ids"])
-    top =[label for label in found if "/" not in label["name"]]
-    seen = connection.seen_label_ids
-    connection.seen_label_ids = sorted(label["id"] for label in top)
-    connection.save(update_fields=["seen_label_ids"])
-    if seen is None:
-        return []
+    note of what's there: older undescribed labels stay with the "Add them" button.
+    A name too long for the editor is skipped and stays with that button too."""
+    top = [label for label in found if "/" not in label["name"]]
+    # The Labels tab and an agent run can import at once. The database is set to
+    # take its write lock when the transaction starts (transaction_mode IMMEDIATE),
+    # so the second import waits and then reads the first one's ids and rows.
+    with transaction.atomic():
+        connection = GoogleConnection.objects.get(user=user)
+        seen = connection.seen_label_ids
+        # Only add ids: an older Gmail list saved after a newer one mustn't drop
+        # ids the newer one recorded, or a deleted row could come back.
+        connection.seen_label_ids = sorted(set(seen or []) | {label["id"] for label in top})
+        connection.save(update_fields=["seen_label_ids"])
+        if seen is None:
+            return []
 
-    rows = user_labels(user)
-    described = {labels.key(row.name) for row in rows}
-    position = max((row.position for row in rows), default=-1) + 1
-    added = []
-    for label in top:
-        name_key = labels.key(label["name"])
-        if label["id"] in seen or not name_key or name_key in described:
-            continue
-        if len(rows) + len(added) >= LABELS_MAX:
-            break  # still listed under "In Gmail but not described"
-        described.add(name_key)
-        emoji, name = labels.split_emoji(label["name"])
-        added.append(Label(user=user, position=position + len(added), emoji=emoji, name=name))
-    Label.objects.bulk_create(added)
+        rows = user_labels(user)
+        described = {labels.key(row.name) for row in rows}
+        position = max((row.position for row in rows), default=-1) + 1
+        added = []
+        for label in top:
+            name_key = labels.key(label["name"])
+            if label["id"] in seen or not name_key or name_key in described:
+                continue
+            if len(rows) + len(added) >= LABELS_MAX:
+                break  # still listed under "In Gmail but not described"
+            emoji, name = labels.split_emoji(label["name"])
+            if not fits(emoji, name):
+                continue  # still listed under "In Gmail but not described"
+            described.add(name_key)
+            added.append(Label(user=user, position=position + len(added), emoji=emoji, name=name))
+        Label.objects.bulk_create(added)
     return [str(row) for row in added]
 
 
