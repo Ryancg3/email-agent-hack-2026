@@ -22,7 +22,16 @@
 
   {% if problem %}
     <div class="alert alert-info label-note">{{ problem }}</div>
-  {% elif missing %}
+  {% endif %}
+  {% if not_in_gmail %}
+    <div class="alert alert-warning label-note">
+      <span>Not in Gmail yet, so the agent can't use them: {{ not_in_gmail|join:", " }}</span>
+      <form method="post" action="{% url 'push_missing_labels' %}">
+        {% csrf_token %}<button class="btn btn-secondary btn-sm">Create in Gmail</button>
+      </form>
+    </div>
+  {% endif %}
+  {% if missing %}
     <div class="alert alert-warning label-note">
       <span>In Gmail but not described: {{ missing|join:", " }}</span>
       <form method="post" action="{% url 'add_missing_labels' %}">

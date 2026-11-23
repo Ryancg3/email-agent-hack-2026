@@ -9,7 +9,7 @@ from triage import gmail
 from triage import labels
 from triage import run_context
 
-from . import google_connect
+from . import google_connect, label_sync
 from .models import GoogleConnection, ProcessedEmail, User, user_labels
 
 LOOKBACK = 100    # newest inbox ids to check for unprocessed emails
@@ -55,7 +55,10 @@ def _label_names() -> list[str]:
 
 
 def _process_emails(user: User, connection: GoogleConnection, rerun_newest: int) -> None:
-    label_names = _label_names()
+    found = gmail.list_labels()
+    if imported := label_sync.import_from_gmail(user, found):
+        print(f"[labels] {user.email}: imported from Gmail: {', '.join(imported)}")
+    label_names = [label["name"] for label in found]
     if not [name for name in label_names if "/" not in name]:
         raise RuntimeError("No labels in Gmail. Create the labels the agent should choose from.")
     for warning in labels.check(label_names):

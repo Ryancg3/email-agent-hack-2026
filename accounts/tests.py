@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from django.apps import apps
+from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone as django_timezone
@@ -255,7 +256,7 @@ class RunnerTests(TestCase):
         self.user = make_connected_user()
         patcher = mock.patch.multiple(
             runner.gmail,
-            list_labels=mock.Mock(return_value=[{"name": "Work"}]),
+            list_labels=mock.Mock(return_value=[{"id": "Label_1", "name": "Work"}]),
             list_inbox_ids=mock.Mock(return_value=["m3", "m2", "m1"]),  # newest first
             get_email=lambda message_id: {
                 "id": message_id, "thread_id": f"t{message_id}", "sender": "s", "to": "t", "cc": "",
@@ -348,9 +349,12 @@ class LabelsTabTests(TestCase):
         self.client.force_login(self.user)
         patcher = mock.patch.object(
             runner.gmail, "list_labels",
-            return_value=[{"name": "✈️ Travel"}, {"name": "✈️ Travel/Rome"}, {"name": "Hobbies"}],
+            return_value=[{"id": "L1", "name": "✈️ Travel"}, {"id": "L2", "name": "✈️ Travel/Rome"}, {"id": "L3", "name": "Hobbies"}],
         )
         self.list_labels = patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(runner.gmail, "create_label", return_value="Label_new")
+        self.create_label = patcher.start()
         self.addCleanup(patcher.stop)
 
     def rows(self):
@@ -441,7 +445,7 @@ class LabelsTabTests(TestCase):
         self.assertEqual(self.rows(), [("", "Travel"), ("", "Hobbies")])
 
     def test_add_missing_stays_within_the_limit(self, _):
-        self.list_labels.return_value = [{"name": "Hobbies"}, {"name": "Sport"}]
+        self.list_labels.return_value = [{"id": "L3", "name": "Hobbies"}, {"id": "L4", "name": "Sport"}]
         self.user.labels.all().delete()
         Label.objects.bulk_create(Label(user=self.user, position=i, name=f"Mine {chr(65 + i)}") for i in range(LABELS_MAX - 1))
         response = self.client.post(reverse("add_missing_labels"), follow=True)
@@ -454,6 +458,103 @@ class LabelsTabTests(TestCase):
         self.assertContains(self.client.get(reverse("labels")), f"1 of {LABELS_MAX} labels")
         Label.objects.bulk_create(Label(user=self.user, position=i + 1, name=f"Mine {chr(65 + i)}") for i in range(LABELS_MAX - 1))
         self.assertContains(self.client.get(reverse("labels")), f"{LABELS_MAX} of {LABELS_MAX} labels. Delete one to add another.")
+
+    def test_saving_a_new_label_creates_it_in_gmail(self, _):
+        self.user.labels.all().delete()
+        travel = Label.objects.create(user=self.user, emoji="✈️", name="Travel")
+        mine = Label.objects.create(user=self.user, position=1, name="Mine")  # not in Gmail, not new
+        data = formset_data([
+            {"id": travel.pk, "emoji": "✈️", "name": "Travel"},
+            {"id": mine.pk, "emoji": "", "name": "Mine"},
+            {"emoji": "💼", "name": "Work"},
+            {"emoji": "", "name": "hobbies"},  # Gmail has "Hobbies": matched by letters
+        ], initial=2)
+        response = self.client.post(reverse("labels"), data, follow=True)
+        self.create_label.assert_called_once_with("💼 Work")
+        self.assertContains(response, "Created in Gmail: 💼 Work.")
+
+    def test_a_gmail_failure_still_saves_the_labels(self, _):
+        self.user.labels.all().delete()
+        travel = Label.objects.create(user=self.user, emoji="✈️", name="Travel")
+        self.create_label.side_effect = RuntimeError("name is reserved")
+        response = self.client.post(reverse("labels"), formset_data([
+            {"id": travel.pk, "emoji": "✈️", "name": "Travel"}, {"emoji": "", "name": "Work"},
+        ], initial=1), follow=True)
+        self.assertEqual(self.rows(), [("✈️", "Travel"), ("", "Work")])
+        self.assertContains(response, "Labels saved.")
+        self.assertContains(response, "Couldn&#x27;t create Work in Gmail: name is reserved")
+
+    def test_saving_without_google_creates_nothing(self, _):
+        self.user.google.delete()
+        self.user.labels.all().delete()
+        travel = Label.objects.create(user=self.user, emoji="✈️", name="Travel")
+        response = self.client.post(reverse("labels"), formset_data([
+            {"id": travel.pk, "emoji": "✈️", "name": "Travel"}, {"emoji": "", "name": "Work"},
+        ], initial=1), follow=True)
+        self.assertEqual(self.rows(), [("✈️", "Travel"), ("", "Work")])
+        self.assertContains(response, "Connect Google to check your labels against Gmail.")
+        self.create_label.assert_not_called()
+
+    def test_create_all_missing_in_gmail(self, _):
+        self.user.labels.all().delete()
+        Label.objects.create(user=self.user, emoji="✈️", name="Travel")
+        Label.objects.create(user=self.user, position=1, emoji="💻", name="Coding")
+        Label.objects.create(user=self.user, position=2, name="Personal")
+        response = self.client.get(reverse("labels"))
+        self.assertContains(response, "Not in Gmail yet, so the agent can't use them: Coding, Personal")
+        response = self.client.post(reverse("push_missing_labels"), follow=True)
+        self.assertEqual([c.args[0] for c in self.create_label.call_args_list], ["💻 Coding", "Personal"])
+        self.assertContains(response, "Created in Gmail: 💻 Coding, Personal.")
+
+    def test_a_label_made_in_gmail_is_imported_once(self, _):
+        self.user.labels.all().delete()
+        Label.objects.create(user=self.user, emoji="✈️", name="Travel")
+        response = self.client.get(reverse("labels"))  # first look: only takes note
+        self.assertEqual(self.rows(), [("✈️", "Travel")])
+        self.assertContains(response, "In Gmail but not described: Hobbies")
+
+        self.list_labels.return_value += [
+            {"id": "L5", "name": "🎸 Music"}, {"id": "L6", "name": "Music/Gigs"}, {"id": "L7", "name": "travel"},
+        ]
+        response = self.client.get(reverse("labels"))
+        self.assertEqual(self.rows(), [("✈️", "Travel"), ("🎸", "Music")])  # not Hobbies, the sub-label or the Travel twin
+        self.assertContains(response, "New in Gmail, added below: 🎸 Music.")
+
+        self.user.labels.get(name="Music").delete()
+        self.client.get(reverse("labels"))
+        self.assertEqual(self.rows(), [("✈️", "Travel")])  # a deleted row stays deleted
+
+    def test_the_agent_run_imports_new_gmail_labels(self, _):
+        self.user.labels.all().delete()
+        Label.objects.create(user=self.user, name="Hobbies")
+        self.user.google.seen_label_ids = ["L1", "L3"]
+        self.user.google.save()
+        self.list_labels.return_value.append({"id": "L5", "name": "Music"})
+        with mock.patch.object(runner.gmail, "list_inbox_ids", return_value=[]):
+            runner.run_user(self.user)
+        self.assertEqual(self.rows(), [("", "Hobbies"), ("", "Music")])
+        self.assertEqual(GoogleConnection.objects.get(user=self.user).seen_label_ids, ["L1", "L3", "L5"])
+
+    def test_a_stale_run_doesnt_bring_back_a_deleted_row(self, _):
+        self.user.labels.all().delete()
+        Label.objects.create(user=self.user, name="Hobbies")
+        GoogleConnection.objects.filter(user=self.user).update(seen_label_ids=["L1", "L3"])
+        user = User.objects.select_related("google").get(pk=self.user.pk)  # loaded up front, like the scheduler
+        self.list_labels.return_value.append({"id": "L5", "name": "Music"})
+        self.client.get(reverse("labels"))  # the Labels tab imports Music...
+        self.user.labels.get(name="Music").delete()  # ...and the user deletes it
+        with mock.patch.object(runner.gmail, "list_inbox_ids", return_value=[]):
+            runner.run_user(user)
+        self.assertEqual(self.rows(), [("", "Hobbies")])
+
+    def test_push_labels_command(self, _):
+        self.user.labels.all().delete()
+        Label.objects.create(user=self.user, emoji="💼", name="Work")
+        Label.objects.create(user=self.user, position=1, emoji="✈️", name="Travel")
+        out = StringIO()
+        call_command("push_labels", stdout=out)
+        self.create_label.assert_called_once_with("💼 Work")
+        self.assertIn("a@example.com: created 💼 Work", out.getvalue())
 
     def test_reset_to_defaults(self, _):
         self.user.labels.all().delete()

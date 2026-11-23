@@ -17,7 +17,7 @@ from triage import gmail
 from triage import labels
 from triage import run_context
 
-from . import cleanup_runner, google_connect, push, runner
+from . import cleanup_runner, google_connect, label_sync, push, runner
 from .forms import LABELS_MAX, LabelFormSet, SettingsForm, SignupForm
 from .models import GoogleConnection, Label, ProcessedEmail, seed_labels, user_labels
 
@@ -138,13 +138,22 @@ def cleanup_now(request):
 @login_required
 def labels_page(request):
     user_labels(request.user)
-    formset = LabelFormSet(request.POST or None, queryset=request.user.labels.all(), prefix="labels")
-    if request.method == "POST" and formset.is_valid():
-        _save_labels(request.user, formset)
-        messages.success(request, "Labels saved. The next run uses them.")
-        return redirect("labels")
+    if request.method == "POST":
+        formset = LabelFormSet(request.POST, queryset=request.user.labels.all(), prefix="labels")
+        if formset.is_valid():
+            added = _save_labels(request.user, formset)
+            messages.success(request, "Labels saved. The next run uses them.")
+            _report_push(request, *label_sync.push_to_gmail(request.user, added))
+            return redirect("labels")
+        found, problem = label_sync.gmail_labels(request.user)
+    else:
+        # Import before building the formset, so new rows show up right away.
+        found, problem = label_sync.gmail_labels(request.user)
+        if found is not None and (imported := label_sync.import_from_gmail(request.user, found)):
+            messages.success(request, f"New in Gmail, added below: {', '.join(imported)}. Describe them so the agent knows what goes there.")
+        formset = LabelFormSet(queryset=request.user.labels.all(), prefix="labels")
 
-    gmail_names, problem = _gmail_label_names(request.user)
+    gmail_names = None if found is None else [label["name"] for label in found]
     missing = []
     if gmail_names is not None:
         in_gmail = {labels.key(name): name for name in gmail_names if "/" not in name}
@@ -154,27 +163,50 @@ def labels_page(request):
             form.not_in_gmail = bool(form.instance.pk) and labels.key(form.initial.get("name", "")) not in in_gmail
     return render(request, "accounts/labels.html", {
         "formset": formset, "missing": missing, "problem": problem,
+        "not_in_gmail": [form.initial.get("name", "") for form in formset if getattr(form, "not_in_gmail", False)],
         "label_count": request.user.labels.count(), "labels_max": LABELS_MAX,
     })
 
 
-def _save_labels(user, formset) -> None:
+def _save_labels(user, formset) -> list[Label]:
+    """Saves the formset and returns the rows it added."""
     rows = formset.save(commit=False)
     for label in formset.deleted_objects:
         label.delete()
     position = max(user.labels.values_list("position", flat=True), default=-1) + 1
+    added = []
     for label in rows:
         if label.pk is None:
             label.user, label.position = user, position
             position += 1
+            added.append(label)
         label.save()
+    return added
+
+
+def _report_push(request, created: list[str], problems: list[str]) -> None:
+    if created:
+        messages.success(request, f"Created in Gmail: {', '.join(created)}.")
+    for problem in problems:
+        messages.error(request, problem)
+
+
+@login_required
+@require_POST
+def push_missing_labels(request):
+    """Creates every label of the user's that Gmail doesn't have yet."""
+    created, problems = label_sync.push_to_gmail(request.user, user_labels(request.user))
+    if not created and not problems:
+        messages.success(request, "All your labels are already in Gmail.")
+    _report_push(request, created, problems)
+    return redirect("labels")
 
 
 @login_required
 @require_POST
 def add_missing_labels(request):
     """Adds an empty row for each Gmail top-level label the user hasn't described."""
-    gmail_names, problem = _gmail_label_names(request.user)
+    gmail_names, problem = label_sync.gmail_label_names(request.user)
     if gmail_names is None:
         messages.error(request, problem)
         return redirect("labels")
@@ -209,18 +241,6 @@ def reset_labels(request):
     seed_labels(request.user)
     messages.success(request, "Labels reset to the defaults.")
     return redirect("labels")
-
-
-def _gmail_label_names(user) -> tuple[list[str] | None, str]:
-    """The user's Gmail label names, or None and why Gmail couldn't be read."""
-    connection = GoogleConnection.objects.filter(user=user).first()
-    if not connection or connection.status != GoogleConnection.Status.CONNECTED:
-        return None, "Connect Google to check your labels against Gmail."
-    try:
-        with run_context.use(runner.context(user)):
-            return [label["name"] for label in gmail.list_labels()], ""
-    except Exception as e:
-        return None, f"Couldn't read your Gmail labels: {e}"
 
 
 def _callback_url(request) -> str:
@@ -277,6 +297,7 @@ def google_callback(request):
         # Reconnecting the same account keeps the cutoff, so emails that arrived while
         # it was disconnected are still processed.
         defaults["connected_at"] = timezone.now()
+        defaults["seen_label_ids"] = None  # its labels are a new starting point
     connection, _ = GoogleConnection.objects.update_or_create(user=request.user, defaults=defaults)
     messages.success(request, f"Connected {connection.google_email}.")
     return redirect("dashboard")
