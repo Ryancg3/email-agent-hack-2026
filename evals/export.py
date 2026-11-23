@@ -1,30 +1,32 @@
-"""Save real emails once as the eval test set (SHY-12). Reads Gmail, changes nothing.
+"""Add emails to the eval dataset, in one step (SHY-12):
+
+1. Pull the newest received emails not yet in the dataset, from Gmail, read-only.
+   For variety, at most DOMAIN_CAPS per sender domain and MAX_PER_SENDER per sender
+   across the whole dataset, never two from a sender with the same subject apart
+   from numbers.
+2. Pre-fill each with what the agent decides live (the classify model and your
+   label descriptions): labels, urgency, needs reply. Asks before spending.
+3. Open the review page on the new emails. They stay "to do", and out of every
+   benchmark, until you mark them done there.
 
 Usage:
-    python -m evals.export [N] [--force]   # pull the newest N received emails (default 300)
+    python -m evals.export [N]    # add up to N new emails (default 50)
 
-Pulls N emails, then drops near-duplicates: at most MAX_PER_SENDER per sender, and
-never two with the same subject apart from numbers. Each kept email records
-sender_emails: how many emails its sender sent in the scanned period, capped ones
-included. The eval uses it to also score the inbox as it really is, where a
-frequent sender counts for more, not only the varied set.
-
-Writes two files to eval_data/, which is gitignored so your emails never reach the repo:
+Everything goes to eval_data/, which is gitignored, so your emails never reach the repo:
     emails.jsonl   one email per line, as the agent sees it
-    answers.csv    the right answer for each email, plus which account it came from;
-                   labels are pre-filled from Gmail. Check them with make eval-review.
-                   Delete a row to drop that email from the eval.
-    labels.json    the account's Gmail label names, for the review page's label picker
+    answers.csv    your answer for each email, which account it came from, and
+                   sender_emails: how many emails that sender sent in the scan, so
+                   the benchmark can weight frequent senders like your real inbox
+    labels.json    the account's Gmail label names, refreshed on each export
     labels.md      (copied by hand) your label descriptions, as on the web app's Labels tab
-An existing answers.csv is never overwritten without --force, so corrections aren't lost.
+    profile.json   (by hand) {"first_name", "last_name"} to sign drafts with
 """
 
 import argparse
-import csv
 import json
 import re
-import sys
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from email.utils import parseaddr
 from pathlib import Path
 
@@ -39,7 +41,8 @@ LABELS_FILE = DATA_DIR / "labels.json"
 DESCRIPTIONS_FILE = DATA_DIR / "labels.md"
 # {"first_name", "last_name"}: who drafts are signed by in the eval (the CLI default is Jane Doe).
 PROFILE_FILE = DATA_DIR / "profile.json"
-DEFAULT_COUNT = 300
+DEFAULT_COUNT = 50
+PARALLEL = 8
 # Received mail only: not sent, drafts, chats, spam or trash. Archived emails count.
 QUERY = "-in:sent -in:drafts -in:chats -in:spam -in:trash"
 # Most emails kept per sender domain, so frequent senders don't dominate the set.
@@ -89,100 +92,119 @@ def capped_domain(sender: str) -> str | None:
     return next((d for d in DOMAIN_CAPS if host == d or host.endswith("." + d)), None)
 
 
-def gmail_labels(label_ids: list[str], names: dict[str, str]) -> str:
-    """The email's user labels as the agent writes them ("Work/Launch; Team"):
-    a parent is left out when its sub-label is there."""
-    on_email = sorted(names[i] for i in label_ids if i in names)
-    return "; ".join(n for n in on_email if not any(o.startswith(n + "/") for o in on_email))
-
-
-def pick(count: int) -> tuple[list[dict], Counter]:
-    """The newest received emails, skipping the user's own (like the agent's
-    reminders) and anything over a DOMAIN_CAPS cap. Also returns how many emails
-    each sender had among all scanned, capped ones included."""
+def pick(count: int, dataset: list[dict]) -> tuple[list[dict], Counter]:
+    """Up to `count` of the newest received emails that aren't in the dataset yet,
+    keeping the variety rules over the dataset and the new emails together. Skips
+    the user's own (like the agent's reminders). Also returns how many emails each
+    sender had among all scanned."""
     me = gmail.my_address().lower()
-    names = {label["id"]: label["name"] for label in gmail.list_labels()}
-    kept, per_domain, seen, skipped = [], Counter(), Counter(), 0
+    have = {row["id"] for row in dataset}
+    per_domain = Counter(capped_domain(row["sender"]) for row in dataset if capped_domain(row["sender"]))
+    subjects: dict[str, set] = {}
+    for row in dataset:
+        subjects.setdefault(address(row["sender"]), set()).add(subject_key(row["subject"]))
+    kept, seen = [], Counter()
     for message_id in gmail.search_ids(QUERY):
+        if message_id in have:
+            continue
         summary = gmail.get_summary(message_id)
-        if address(summary["sender"]) == me:
+        sender = address(summary["sender"])
+        if sender == me:
             continue
-        seen[address(summary["sender"])] += 1
-        capped = capped_domain(summary["sender"])
-        if capped and per_domain[capped] >= DOMAIN_CAPS[capped]:
-            skipped += 1
+        seen[sender] += 1
+        capped, key = capped_domain(summary["sender"]), subject_key(summary["subject"])
+        mine = subjects.setdefault(sender, set())
+        if (capped and per_domain[capped] >= DOMAIN_CAPS[capped]) or len(mine) >= MAX_PER_SENDER or key in mine:
             continue
-        if capped:
-            per_domain[capped] += 1
+        per_domain[capped] += 1 if capped else 0
+        mine.add(key)
         email = gmail.get_email(message_id)
         email["date"] = summary["date"].isoformat()
         email["account"] = me
-        email["labels"] = gmail_labels(gmail.get_label_ids(message_id), names)
         kept.append(email)
         print(f"[{len(kept)}/{count}] {summary['sender'][:40]} | {summary['subject'][:60]}")
         if len(kept) == count:
             break
-    print(f"Skipped {skipped} emails over the caps {DOMAIN_CAPS}.")
+    for email in kept:
+        email["sender_emails"] = seen[address(email["sender"])]
     return kept, seen
 
 
-def prune(emails: list[dict], seen: Counter) -> list[dict]:
-    """Drop near-duplicates (see the module docstring), and record on each kept
-    email how many emails its sender had among all scanned."""
-    kept, subjects = [], {}
-    for email in emails:
-        sender, key = address(email["sender"]), subject_key(email["subject"])
-        if len(subjects.setdefault(sender, set())) >= MAX_PER_SENDER or key in subjects[sender]:
-            continue
-        subjects[sender].add(key)
-        kept.append(email)
-    for email in kept:
-        email["sender_emails"] = seen[address(email["sender"])]
-    return kept
+def agent_guess(email: dict, names: list[str], ctx: run_context.RunContext) -> dict:
+    """What the agent decides for this email live: its labels (without sub-labels,
+    which have no right answer), urgency and whether a reply is needed."""
+    from triage import pipeline
+
+    fields = {k: v for k, v in email.items() if k in pipeline.Email.model_fields}
+    with run_context.use(ctx):  # each worker thread sets it itself; threads don't inherit it
+        result = pipeline.classify(pipeline.Email(**fields), names)
+    tops = list(dict.fromkeys(label for label, _ in pipeline.pick_labels(result)))
+    return {"labels": "; ".join(tops), "urgency": result.urgency, "needs_reply": "yes" if result.needs_reply else "no"}
 
 
-def coverage(emails: list[dict]) -> str:
-    """How many kept emails carry each pre-filled label, parents and sub-labels together."""
-    counts = Counter(
-        label.split("/")[0] for email in emails for label in email["labels"].split("; ") if label
-    )
-    counts["(no label)"] = sum(1 for email in emails if not email["labels"])
-    return "\n".join(f"  {n:3}  {label}" for label, n in counts.most_common())
+def prefill(emails: list[dict], names: list[str]) -> dict[str, dict]:
+    """The agent's guesses by email id; an email that fails is left blank to fill in by hand."""
+    ctx = offline_context()
+
+    def one(email):
+        try:
+            return email["id"], agent_guess(email, names, ctx)
+        except Exception as e:
+            print(f"[not pre-filled] {email['subject'][:50]}: {e}")
+            return email["id"], None
+
+    with ThreadPoolExecutor(PARALLEL) as pool:
+        return {email_id: guess for email_id, guess in pool.map(one, emails) if guess}
 
 
-def write(emails: list[dict], label_names: list[str]) -> None:
+def prefill_estimate(count: int) -> str:
+    from triage import pipeline
+
+    from .prices import dollars
+    # About 4,000 tokens in (the label descriptions and the email) and 250 out per email.
+    return f"about ${count * dollars(pipeline.CLASSIFY_MODEL, 4000, 250):.2f} with {pipeline.CLASSIFY_MODEL}"
+
+
+def append(emails: list[dict], guesses: dict[str, dict], dataset: list[dict]) -> None:
+    """Add the new emails to emails.jsonl and, as to-do rows, to answers.csv."""
+    from . import review
+
     DATA_DIR.mkdir(exist_ok=True)
-    LABELS_FILE.write_text(json.dumps(sorted(label_names), ensure_ascii=False, indent=1))
-    with EMAILS_FILE.open("w") as f:
+    with EMAILS_FILE.open("a") as f:
         for email in emails:
-            agent_view = {k: v for k, v in email.items() if k not in ("labels", "sender_emails", "account")}
+            agent_view = {k: v for k, v in email.items() if k not in ("sender_emails", "account")}
             f.write(json.dumps(agent_view, ensure_ascii=False) + "\n")
-    with ANSWERS_FILE.open("w", newline="") as f:
-        writer = csv.DictWriter(f, ANSWER_COLUMNS)
-        writer.writeheader()
-        for email in emails:
-            writer.writerow({
-                "id": email["id"], "account": email["account"], "date": email["date"][:10],
-                "sender": email["sender"], "subject": email["subject"], "labels": email["labels"],
-                "urgency": "", "needs_reply": "", "checked": "", "sender_emails": email["sender_emails"], "notes": "",
-            })
+    rows = dataset + [{
+        "id": e["id"], "account": e["account"], "date": e["date"][:10], "sender": e["sender"],
+        "subject": e["subject"], "checked": "", "sender_emails": e["sender_emails"], "notes": "",
+        **(guesses.get(e["id"]) or {"labels": "", "urgency": "", "needs_reply": ""}),
+    } for e in emails]
+    review.write_rows(rows)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Save real emails once as the eval test set.")
-    parser.add_argument("count", nargs="?", type=int, default=DEFAULT_COUNT)
-    parser.add_argument("--force", action="store_true", help="overwrite an existing answers.csv")
+    from . import review
+
+    parser = argparse.ArgumentParser(description="Add emails to the eval dataset: pull, pre-fill, review.")
+    parser.add_argument("count", nargs="?", type=int, default=DEFAULT_COUNT, help="new emails to add (default 50)")
+    parser.add_argument("--yes", action="store_true", help="pre-fill without asking")
     args = parser.parse_args()
-    if ANSWERS_FILE.exists() and not args.force:
-        sys.exit(f"{ANSWERS_FILE} already exists and may hold your corrections. Use --force to overwrite it.")
-    pulled, seen = pick(args.count)
-    emails = prune(pulled, seen)
-    write(emails, [label["name"] for label in gmail.list_labels()])
-    print(f"\nPulled {len(pulled)}, kept {len(emails)} after dropping near-duplicates "
-          f"(max {MAX_PER_SENDER} per sender), from {len(seen)} senders.")
-    print(f"Pre-filled labels of the kept emails:\n{coverage(emails)}")
-    print(f"\nSaved to {EMAILS_FILE}")
-    print("Next: make eval-prefill, then make eval-review to check the answers.")
+
+    dataset = review.read_rows() if ANSWERS_FILE.exists() else []
+    print(f"Dataset: {len(dataset)} emails. Pulling up to {args.count} new ones from Gmail (read-only)...")
+    emails, seen = pick(args.count, dataset)
+    if not emails:
+        raise SystemExit("No new emails that fit the variety rules. Nothing added.")
+    names = [label["name"] for label in gmail.list_labels()]
+    DATA_DIR.mkdir(exist_ok=True)
+    LABELS_FILE.write_text(json.dumps(sorted(names), ensure_ascii=False, indent=1))
+
+    question = f"Pre-fill {len(emails)} emails with the agent's decisions, {prefill_estimate(len(emails))}? [y/N] "
+    guesses = prefill(emails, names) if args.yes or input(question).strip().lower().startswith("y") else {}
+    append(emails, guesses, dataset)
+    print(f"\nAdded {len(emails)} emails ({len(guesses)} pre-filled) from {len(seen)} senders. "
+          f"They stay out of the benchmark until you mark them done.")
+    review.serve(to_do=True)
 
 
 if __name__ == "__main__":

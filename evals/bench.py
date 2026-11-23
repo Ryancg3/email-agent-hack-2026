@@ -11,12 +11,12 @@ Usage:
     python -m evals.bench --name no-loop --agent none      # skip the agent tool loop
     python -m evals.bench --name loop-always --loop-always # the loop on every email, as before
     python -m evals.bench --limit 20                       # a quick, cheaper check
-    python -m evals.bench --list                           # every saved benchmark, side by side
 
+By default it runs the whole system; only --agent none and --limit make it partial.
 Needs token.json and ANTHROPIC_API_KEY, and costs money: it asks before starting.
 Each run is saved to eval_runs/bench/<time>-<name>/ (results.jsonl, summary.json),
-and a summary line is added to eval_runs/bench/leaderboard.csv. Compare runs with
-python -m evals.bench_compare.
+and a summary line is added to eval_runs/bench/leaderboard.csv. Compare two runs,
+and flag the one in production, on the page from python -m evals.bench_review.
 """
 
 import argparse
@@ -36,10 +36,10 @@ from triage import agent, pipeline, run_context
 
 from . import review
 from .export import label_names, load_emails
-from .monthly import VOLUME_FILE
+from .calls import live_context, recording
 from .prices import dollars, require_prices
-from .run import MODELS, RUNS_DIR, URGENT, grade, share, weights
-from .trace import live_context, recording
+from .scoring import MODELS, RUNS_DIR, URGENT, grade, share, weights
+from .volume import monthly_emails
 
 BENCH_DIR = RUNS_DIR / "bench"
 LEADERBOARD = BENCH_DIR / "leaderboard.csv"
@@ -125,7 +125,7 @@ def run_one(row: dict, email: dict, names: list[str]) -> dict:
     return record(row, result, log.calls, ctx.would_do[first_write:], time.monotonic() - start, error)
 
 
-def summarize(name: str, models: dict, records: list[dict], rows: list[dict], monthly_emails: int | None) -> dict:
+def summarize(name: str, models: dict, records: list[dict], rows: list[dict], emails_a_month: int | None) -> dict:
     """Accuracy and cost of one benchmark run."""
     by_id = {r["id"]: r for r in records}
     rows = [r for r in rows if r["id"] in by_id]
@@ -157,16 +157,12 @@ def summarize(name: str, models: dict, records: list[dict], rows: list[dict], mo
         "input_tokens_per_email": tokens["input"],
         "output_tokens_per_email": tokens["output"],
         "seconds_per_email": sum(r["seconds"] for r in records) / n,
-        "monthly_emails": monthly_emails,
-        "dollars_per_month": real_cost * monthly_emails if monthly_emails else None,
+        "monthly_emails": emails_a_month,
+        "dollars_per_month": real_cost * emails_a_month if emails_a_month else None,
         "emails_per_dollar": 1 / real_cost if real_cost else None,
         "errors": sum(1 for r in records if r["error"]),
         "total_dollars": spent,
     }
-
-
-def monthly_emails() -> int | None:
-    return json.loads(VOLUME_FILE.read_text())["average"] if VOLUME_FILE.exists() else None
 
 
 def save(summary: dict, records: list[dict], stamp: str) -> Path:
@@ -284,34 +280,38 @@ def cost_breakdown(s: dict) -> str:
         lines.append(f"\nMonthly: {s['monthly_emails']:,} emails × ${s['dollars_per_email_real_inbox']:.5f} "
                      f"= about ${s['dollars_per_month']:.2f} a month")
     else:
-        lines.append("\nMonthly: run make eval-monthly once (free) to scale this to a month.")
+        lines.append("\nMonthly: unknown (Gmail's email count could not be read).")
     return "\n".join(lines)
 
 
 def estimate(models: dict, rows: list[dict]) -> str:
     """A rough cost before starting: from the newest run of the same models, else
-    from the newest eval-trace, priced at these models."""
+    from the tokens per step of the newest run of any system, priced at these models."""
     for s in reversed(load_runs()):
         same = all(s.get(f"model_{k}") == v for k, v in models.items() if k != "emails_dated")
         # Only runs that mostly worked: a run that failed (e.g. a bad API key) cost nothing.
         if same and s["emails"] and s["errors"] < s["emails"] / 2 and s["total_dollars"] > 0:
             return f"about ${s['dollars_per_email'] * len(rows):.2f} (from run {s['run']})"
-    traces = sorted(RUNS_DIR.glob("trace-*.json"))
-    if not traces:
-        return "unknown: no earlier run or trace to estimate from"
-    calls = json.loads(traces[-1].read_text())["calls"]
+    worked = [s for s in load_runs() if s["emails"] and s["errors"] < s["emails"] / 2 and s["total_dollars"] > 0]
+    if not worked:
+        return "unknown: no earlier run to estimate from"
+    records = [json.loads(line) for line in (BENCH_DIR / worked[-1]["folder"] / "results.jsonl").read_text().splitlines()]
     model_of = {"classify": models["classify"], "draft reply": models["draft"], "agent loop": models["agent"]}
 
     def step(name: str) -> float:
-        found = [c for c in calls if c["step"] == name]
+        """Average cost of this step for an email that runs it, at the chosen model."""
+        ran = [[c for c in r["calls"] if c["step"] == name] for r in records]
+        ran = [calls for calls in ran if calls]
         model = model_of[name]
-        return 0.0 if model == "none" else sum(dollars(model, c["input_tokens"], c["output_tokens"]) for c in found)
+        if model == "none" or not ran:
+            return 0.0
+        return sum(dollars(model, c["input_tokens"], c["output_tokens"]) for calls in ran for c in calls) / len(ran)
 
     replies = sum(r["needs_reply"] == "yes" for r in rows)
     looped = len(rows) if models["loop_runs"] == "every email" else sum(
         r["needs_reply"] == "yes" or r["urgency"] != "not_urgent" for r in rows)
     total = len(rows) * step("classify") + looped * step("agent loop") + replies * step("draft reply")
-    return f"about ${total:.2f} (rough, from one traced email)"
+    return f"about ${total:.2f} (rough, from the tokens of run {worked[-1]['run']})"
 
 
 def main() -> None:
@@ -372,7 +372,7 @@ def main() -> None:
         if r["error"]:
             print(f"  [error] {r['subject'][:50]}: {r['error']}")
     print("\n" + table([summary]) + "\n\n" + cost_breakdown(summary))
-    print(f"\nSaved: {folder}\nCompare with other runs: make bench-compare")
+    print(f"\nSaved: {folder}\nCompare with other runs: make bench-review")
 
 
 if __name__ == "__main__":

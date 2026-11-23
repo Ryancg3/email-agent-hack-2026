@@ -23,7 +23,7 @@ from . import review
 from .localhost import is_local_request
 from .bench import BENCH_DIR, prod_run, run_folders, set_prod, summarize, with_derived
 from .export import EMAILS_FILE
-from .run import grade
+from .scoring import grade
 
 PAGE = Path(__file__).parent / "bench_review.html"
 

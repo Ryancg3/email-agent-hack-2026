@@ -20,17 +20,14 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 
-from evals import export as eval_export
-from evals import prefill as eval_prefill
-from evals import review as eval_review
-from evals import run as eval_run
 from evals import bench as eval_bench
-from evals import bench_compare as eval_bench_compare
 from evals import bench_review as eval_bench_review
-from evals import compare as eval_compare
-from evals import monthly as eval_monthly
+from evals import calls as eval_calls
+from evals import export as eval_export
 from evals import prices as eval_prices
-from evals import trace as eval_trace
+from evals import review as eval_review
+from evals import scoring as eval_scoring
+from evals import volume as eval_volume
 from triage import actions
 from triage import agent
 from triage import pipeline
@@ -1158,31 +1155,30 @@ class DryRunTests(SimpleTestCase):
         self.gmail_api.assert_not_called()
 
 
+
 class EvalExportTests(SimpleTestCase):
-    """Saving real emails as the eval test set: read only, GitHub capped, labels pre-filled."""
+    """Adding emails: pull new ones with variety, pre-fill with the agent, append as to-do."""
 
     def setUp(self):
-        # Newest first: 7 GitHub emails, one from the user, then two others.
+        # Newest first: 7 GitHub emails, one from the user, then four others.
         senders = ["GitHub <notifications@github.com>"] * 7 + [
-            "Me <me@example.com>", "Ada <ada@example.com>", "Bob <bob@lists.example.org>",
+            "Me <me@example.com>", "Ada <ada@example.com>", "Ada <ada@example.com>", "Ada <ada@example.com>",
+            "Bob <bob@lists.example.org>",
         ]
+        self.subjects = [f"Push {i}" for i in range(7)] + ["note", "Lunch", "Lunch 2", "Trip", "News"]
         self.messages = {f"m{i}": sender for i, sender in enumerate(senders)}
-        labels_on = {"m8": ["L1", "L2"], "m9": ["L3", "INBOX"]}
         gmail_api = mock.Mock()
         for patcher in (
             mock.patch.object(eval_export.gmail, "_service", return_value=gmail_api),
             mock.patch.multiple(
                 eval_export.gmail,
                 my_address=mock.Mock(return_value="me@example.com"),
-                list_labels=mock.Mock(return_value=[
-                    {"id": "L1", "name": "Work"}, {"id": "L2", "name": "Work/Launch"}, {"id": "L3", "name": "Team"},
-                ]),
+                list_labels=mock.Mock(return_value=[{"id": "L1", "name": "Work"}]),
                 search_ids=mock.Mock(side_effect=lambda query: iter(self.messages)),
-                get_summary=lambda i: {"id": i, "sender": self.messages[i], "subject": f"s{i}",
+                get_summary=lambda i: {"id": i, "sender": self.messages[i], "subject": self.subjects[int(i[1:])],
                                        "date": datetime(2026, 11, 20, tzinfo=timezone.utc)},
                 get_email=lambda i: {"id": i, "thread_id": f"t{i}", "sender": self.messages[i], "to": "me",
-                                     "cc": "", "subject": f"s{i}", "body": "b"},
-                get_label_ids=lambda i: labels_on.get(i, []),
+                                     "cc": "", "subject": self.subjects[int(i[1:])], "body": "b"},
             ),
             mock.patch("builtins.print"),
         ):
@@ -1190,49 +1186,50 @@ class EvalExportTests(SimpleTestCase):
             self.addCleanup(patcher.stop)
         self.gmail_api = gmail_api
 
-    def test_caps_github_skips_own_emails_and_prefills_labels(self):
-        emails, seen = eval_export.pick(100)
-        self.assertEqual([e["id"] for e in emails], ["m0", "m1", "m2", "m3", "m4", "m8", "m9"])
-        self.assertEqual(emails[5]["labels"], "Work/Launch")
-        self.assertEqual(emails[6]["labels"], "Team")
-        self.assertEqual(seen["notifications@github.com"], 7)  # capped ones still count
-        self.assertNotIn("me@example.com", seen)
+    def test_caps_skip_own_and_near_duplicates(self):
+        emails, seen = eval_export.pick(100, [])
+        # GitHub capped at 5 (and its numbered subjects are near-duplicates: 1 kept), own email skipped,
+        # Ada's "Lunch 2" is a near-duplicate of "Lunch".
+        self.assertEqual([e["id"] for e in emails], ["m0", "m8", "m10", "m11"])
+        self.assertEqual(seen["notifications@github.com"], 7)
+        self.assertEqual(emails[1]["sender_emails"], 3)
         self.gmail_api.assert_not_called()  # nothing beyond the faked reads
 
-    def test_stops_at_the_count(self):
-        self.assertEqual(len(eval_export.pick(3)[0]), 3)
+    def test_only_new_emails_and_rules_count_the_dataset_too(self):
+        dataset = [{"id": "m0", "sender": "GitHub <notifications@github.com>", "subject": "Push 0"},
+                   {"id": "x", "sender": "Ada <ada@example.com>", "subject": "Hello"},
+                   {"id": "y", "sender": "Ada <ada@example.com>", "subject": "Bye"}]
+        emails, _ = eval_export.pick(100, dataset)
+        self.assertEqual([e["id"] for e in emails], ["m11"])  # Ada already has 2; GitHub's subject is taken: only Bob
+        self.assertEqual(len(eval_export.pick(1, [])[0]), 1)
 
-    def test_prune_drops_near_duplicates_and_counts_each_senders_emails(self):
-        def email(i, sender, subject):
-            return {"id": i, "sender": sender, "subject": subject, "labels": ""}
-        emails = [
-            email("a", "Bank <alerts@bank.com>", "Your code is 4821"),
-            email("b", "Bank <alerts@bank.com>", "Your code is 1734"),  # same subject apart from numbers
-            email("c", "Bank <alerts@bank.com>", "Statement ready"),
-            email("d", "Bank <alerts@bank.com>", "New login"),  # over MAX_PER_SENDER
-            email("e", "Ada <ada@example.com>", "Lunch?"),
-        ]
-        seen = Counter({"alerts@bank.com": 6, "ada@example.com": 1})
-        kept = eval_export.prune(emails, seen)
-        self.assertEqual([(e["id"], e["sender_emails"]) for e in kept], [("a", 6), ("c", 6), ("e", 1)])
+    def test_prefill_uses_the_agents_live_decisions_without_sub_labels(self):
+        result = SimpleNamespace(labels=[SimpleNamespace(label="Work", sublabel_needed=True, sublabel="Launch"),
+                                         SimpleNamespace(label="Team", sublabel_needed=False, sublabel=None)],
+                                 urgency="schedule_time", needs_reply=True)
+        with mock.patch("triage.pipeline.classify", return_value=result) as classify, \
+                mock.patch("triage.labels.allows_sublabel", return_value=True):
+            guess = eval_export.agent_guess({"id": "m1", "thread_id": "t", "sender": "s", "to": "", "cc": "",
+                                             "subject": "s", "body": "b", "date": "d"}, ["Work", "Team"],
+                                            run_context.RunContext(None))
+        self.assertEqual(guess, {"labels": "Work; Team", "urgency": "schedule_time", "needs_reply": "yes"})
+        self.assertEqual(len(classify.call_args.args), 2)  # the live classify model, no override
 
-    def test_never_overwrites_answers_without_force(self):
+    def test_new_emails_are_appended_as_to_do(self):
         with tempfile.TemporaryDirectory() as tmp:
-            answers = Path(tmp) / "answers.csv"
-            answers.write_text("my corrections")
-            with mock.patch.multiple(eval_export, DATA_DIR=Path(tmp), EMAILS_FILE=Path(tmp) / "emails.jsonl",
-                                     ANSWERS_FILE=answers, LABELS_FILE=Path(tmp) / "labels.json"), \
-                    mock.patch("sys.argv", ["eval_export.py"]):
-                with self.assertRaises(SystemExit):
-                    eval_export.main()
-                self.assertEqual(answers.read_text(), "my corrections")
-                with mock.patch("sys.argv", ["eval_export.py", "3", "--force"]):
-                    eval_export.main()
-                rows = answers.read_text().splitlines()
-                emails = (Path(tmp) / "emails.jsonl").read_text().splitlines()
-        self.assertEqual(rows[0], "id,account,date,sender,subject,labels,urgency,needs_reply,checked,sender_emails,notes")
-        self.assertEqual(len(rows), 2)  # header + 1: the 3 pulled differ only in numbers
-        self.assertEqual(set(json.loads(emails[0])), {"id", "thread_id", "sender", "to", "cc", "subject", "body", "date"})
+            files = {"DATA_DIR": Path(tmp), "EMAILS_FILE": Path(tmp) / "emails.jsonl", "ANSWERS_FILE": Path(tmp) / "a.csv",
+                     "LABELS_FILE": Path(tmp) / "labels.json"}
+            with mock.patch.multiple(eval_export, **files), mock.patch.multiple(eval_review, ANSWERS_FILE=files["ANSWERS_FILE"]):
+                old = [{"id": "old", "account": "me", "date": "d", "sender": "s", "subject": "s", "labels": "Work",
+                        "urgency": "not_urgent", "needs_reply": "no", "checked": "yes", "sender_emails": "1", "notes": ""}]
+                new = [{"id": "m1", "thread_id": "t", "sender": "s", "to": "", "cc": "", "subject": "s", "body": "b",
+                        "date": "2026-11-20T00:00:00", "account": "me", "sender_emails": 2}]
+                eval_export.append(new, {"m1": {"labels": "Team", "urgency": "instant", "needs_reply": "yes"}}, old)
+                rows = eval_review.read_rows()
+                saved = files["EMAILS_FILE"].read_text().splitlines()
+        self.assertEqual([(r["id"], r["checked"]) for r in rows], [("old", "yes"), ("m1", "")])
+        self.assertEqual((rows[1]["labels"], rows[1]["urgency"]), ("Team", "instant"))
+        self.assertEqual(set(json.loads(saved[0])), {"id", "thread_id", "sender", "to", "cc", "subject", "body", "date"})
 
 
 class GmailSearchTests(SimpleTestCase):
@@ -1248,15 +1245,6 @@ class GmailSearchTests(SimpleTestCase):
         self.assertEqual(service.users().messages().list.call_args.kwargs["pageToken"], "p2")
 
 
-class EvalPrefillTests(SimpleTestCase):
-    def test_fills_only_empty_cells(self):
-        guessed = {"labels": "Work/Launch", "urgency": "instant", "needs_reply": "yes"}
-        corrected = {"labels": "Team", "urgency": "not_urgent", "needs_reply": "", "notes": ""}
-        eval_prefill.fill(corrected, guessed)
-        self.assertEqual(corrected, {"labels": "Team", "urgency": "not_urgent", "needs_reply": "yes", "notes": ""})
-        empty = {"labels": "", "urgency": "", "needs_reply": "", "notes": "odd one"}
-        eval_prefill.fill(empty, guessed)
-        self.assertEqual(empty, {"labels": "Work/Launch", "urgency": "instant", "needs_reply": "yes", "notes": "odd one"})
 
 
 class EvalReviewTests(SimpleTestCase):
@@ -1314,62 +1302,28 @@ class EvalReviewTests(SimpleTestCase):
         self.assertNotIn("💼 Job Applications/Globex Application", options["top"])
 
 
-class EvalRunTests(SimpleTestCase):
+
+class ScoringTests(SimpleTestCase):
     ROWS = [
-        {"id": "a", "sender": "LinkedIn <jobs@linkedin.com>", "subject": "s", "labels": "Jobs/Meta",
-         "urgency": "not_urgent", "needs_reply": "no", "sender_emails": "30"},
-        {"id": "b", "sender": "LinkedIn <jobs@linkedin.com>", "subject": "s", "labels": "Jobs",
-         "urgency": "not_urgent", "needs_reply": "no", "sender_emails": "30"},
-        {"id": "c", "sender": "Ada <ada@x.com>", "subject": "s", "labels": "",
-         "urgency": "instant", "needs_reply": "yes", "sender_emails": "1"},
+        {"id": "a", "sender": "LinkedIn <jobs@linkedin.com>", "labels": "Jobs", "urgency": "not_urgent",
+         "needs_reply": "no", "sender_emails": "30"},
+        {"id": "b", "sender": "LinkedIn <jobs@linkedin.com>", "labels": "Jobs", "urgency": "not_urgent",
+         "needs_reply": "no", "sender_emails": "30"},
+        {"id": "c", "sender": "Ada <ada@x.com>", "labels": "", "urgency": "instant", "needs_reply": "yes", "sender_emails": "1"},
     ]
 
-    def guess(self, labels="", urgency="not_urgent", reply="no"):
-        return {"labels": labels, "urgency": urgency, "needs_reply": reply, "seconds": 1.0,
-                "input_tokens": 1000, "output_tokens": 100}
-
     def test_weights_share_a_senders_emails_among_its_rows(self):
-        self.assertEqual(eval_run.weights(self.ROWS), {"a": 15.0, "b": 15.0, "c": 1.0})
+        self.assertEqual(eval_scoring.weights(self.ROWS), {"a": 15.0, "b": 15.0, "c": 1.0})
 
     def test_grade_scores_labels_without_their_sub_labels(self):
-        marks = eval_run.grade(self.ROWS[0], self.guess("Jobs/Google"))
-        self.assertEqual((marks["labels"], marks["all"]), (True, True))
-        self.assertFalse(eval_run.grade(self.ROWS[0], None)["all"])
+        guess = {"labels": "Jobs/Google", "urgency": "not_urgent", "needs_reply": "no"}
+        self.assertTrue(eval_scoring.grade(self.ROWS[0], guess)["all"])
+        self.assertFalse(eval_scoring.grade(self.ROWS[0], None)["all"])
 
-    def test_score_reports_rare_classes_and_the_real_inbox(self):
-        guesses = {"a": self.guess("Jobs/Meta"), "b": self.guess("Jobs"), "c": self.guess()}  # misses the urgent one
-        result = eval_run.score("claude-haiku-5-5", self.ROWS, guesses, eval_run.weights(self.ROWS))
-        self.assertAlmostEqual(result["all_right"], 200 / 3)
-        self.assertAlmostEqual(result["all_right_real_inbox"], 3000 / 31)  # the miss stands for 1 of 31 emails
-        self.assertEqual((result["urgent_caught"], result["replies_caught"]), (0, 0))
-        self.assertNotIn("sublabels", result)
-        self.assertAlmostEqual(result["dollars_per_email"], (1000 * 0.10 + 100 * 0.50) / 1e6)
-        self.assertAlmostEqual(result["emails_per_dollar"], 1e6 / (1000 * 0.10 + 100 * 0.50))
-        self.assertEqual(result["errors"], 0)
-
-    def test_drafts_are_priced_by_their_own_model(self):
-        guess = self.guess()
-        guess["draft"] = {"model": "claude-sonnet-5-5", "body": "Hi", "input_tokens": 1000, "output_tokens": 100}
-        broken = self.guess()
-        broken["draft"] = {"model": "claude-sonnet-5-5", "error": "boom"}
-        result = eval_run.score("claude-haiku-5-5", self.ROWS[1:], {"b": broken, "c": guess}, {})
-        self.assertAlmostEqual(result["dollars_per_draft"], (1000 * 2 + 100 * 10) / 1e6)
-
-    def test_draft_gets_the_models_own_labels_as_done(self):
-        result = SimpleNamespace(labels=[SimpleNamespace(label="Jobs", sublabel_needed=True, sublabel="Acme")])
-        with mock.patch.object(eval_run.pipeline, "write_reply",
-                               return_value=SimpleNamespace(body="Hi", reply_all=False, reply_all_reason="")) as write, \
-                mock.patch.object(eval_run.pipeline.labels, "allows_sublabel", return_value=True):
-            out = eval_run.draft({"id": "m1", "thread_id": "t", "sender": "a", "to": "b", "cc": "", "subject": "s",
-                                  "body": "b", "date": "x"}, result, "claude-opus-5-5", run_context.RunContext(None))
-        self.assertEqual(write.call_args.args[2], ["apply_label -> labelled Jobs and Jobs/Acme"])
-        self.assertEqual(write.call_args.kwargs["model"], "claude-opus-5-5")
-        self.assertEqual((out["model"], out["body"]), ("claude-opus-5-5", "Hi"))
-
-    def test_table_shows_a_dash_when_there_is_nothing_to_measure(self):
-        result = eval_run.score("m", self.ROWS[:1], {"a": None}, {})
-        self.assertEqual(result["errors"], 1)
-        self.assertIn("–", eval_run.table([result]))
+    def test_share_can_be_weighted(self):
+        marks = {"a": {"all": True}, "b": {"all": True}, "c": {"all": False}}
+        self.assertAlmostEqual(eval_scoring.share(self.ROWS, marks, "all"), 200 / 3)
+        self.assertAlmostEqual(eval_scoring.share(self.ROWS, marks, "all", eval_scoring.weights(self.ROWS)), 3000 / 31)
 
 
 class ModelChoiceTests(SimpleTestCase):
@@ -1382,131 +1336,57 @@ class ModelChoiceTests(SimpleTestCase):
         self.assertEqual(ask.call_args_list[1].kwargs["model"], agent.MODEL)
         self.assertEqual(agent.MODEL, "claude-sonnet-5-5")
 
-    def test_scores_history_keeps_old_columns_when_metrics_change(self):
-        with tempfile.TemporaryDirectory() as tmp, \
-                mock.patch.multiple(eval_run, RUNS_DIR=Path(tmp), SCORES_FILE=Path(tmp) / "scores.csv"):
-            (Path(tmp) / "scores.csv").write_text("run,commit,model,sublabels\nr1,abc,m,90\n")
-            eval_run.save_scores("r2", [{"model": "m", "labels": 80.0}])
-            rows = list(csv.DictReader((Path(tmp) / "scores.csv").open()))
-        self.assertEqual((rows[0]["sublabels"], rows[0]["labels"]), ("90", ""))
-        self.assertEqual((rows[1]["sublabels"], rows[1]["labels"]), ("", "80.0"))
 
 
-class EvalCompareTests(SimpleTestCase):
-    @staticmethod
-    def record(i, labels, draft=None, needs_reply="yes"):
-        predicted = None if labels is None else {"labels": labels, "needs_reply": needs_reply, "draft": draft}
-        return json.dumps({"id": i, "subject": f"<s{i}>", "sender": "x", "expected": {"labels": "Jobs"},
-                           "predicted": predicted})
 
-    def page(self, files):
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(eval_compare, "RUNS_DIR", Path(tmp)), \
-                mock.patch.object(eval_compare, "EMAILS_FILE", Path(tmp) / "none.jsonl"):
-            for name, lines in files.items():
-                (Path(tmp) / name).write_text("\n".join(lines))
-            return eval_compare.page(eval_compare.prediction_files(), "t")
-
-    def test_sub_labels_side_by_side_without_a_right_answer(self):
-        page = self.page({
-            "20261123-000001-claude-opus-5-5.jsonl": [self.record("a", "Jobs/acme"), self.record("b", "News")],
-            "20261123-000002-claude-haiku-5-5.jsonl": [self.record("a", "Jobs/Acme Application"), self.record("b", "News"),
-                                                       self.record("c", "News/Weekly")],
-        })
-        self.assertLess(page.index("claude-haiku-5-5"), page.index("claude-opus-5-5"))  # model order
-        self.assertIn("Acme Application", page)
-        self.assertIn("&lt;sa&gt;", page)  # escaped
-        self.assertNotIn("&lt;sb&gt;", page)  # no model gave b a sub-label
-        self.assertIn("not in this run", page)  # opus never saw c
-        self.assertNotIn("identical", page)
-
-    def test_drafts_side_by_side_with_cost(self):
-        draft = {"model": "claude-sonnet-5-5", "body": "Hi <Ada>", "reply_all": False, "reply_all_reason": "",
-                 "input_tokens": 1000, "output_tokens": 100}
-        page = self.page({"20261123-000001-claude-haiku-5-5.jsonl": [
-            self.record("a", "Jobs", draft, needs_reply="no"), self.record("b", "Jobs")]})
-        self.assertIn("Hi &lt;Ada&gt;", page)
-        self.assertIn("$0.0030", page)  # 1000 x $2 + 100 x $10 per million
-        self.assertIn("would not draft this", page)  # its classifier said no reply
-        self.assertIn("1 emails", page.split("Reply drafts")[1])
-
-
-class EvalTraceTests(SimpleTestCase):
+class CallLogTests(SimpleTestCase):
     def test_step_is_told_apart_by_the_system_prompt(self):
-        self.assertEqual(eval_trace.step_of(pipeline.SYSTEM_PROMPT + "\nmore"), "classify")
-        self.assertEqual(eval_trace.step_of(agent.ACT_PROMPT), "agent loop")
+        self.assertEqual(eval_calls.step_of(pipeline.SYSTEM_PROMPT + "\nmore"), "classify")
+        self.assertEqual(eval_calls.step_of(agent.ACT_PROMPT), "agent loop")
         with run_context.use(run_context.RunContext(None)):
-            self.assertEqual(eval_trace.step_of(pipeline.load_skill("write-reply")), "draft reply")
-        self.assertEqual(eval_trace.step_of("something else"), "other")
+            self.assertEqual(eval_calls.step_of(pipeline.load_skill("write-reply")), "draft reply")
+        self.assertEqual(eval_calls.step_of("something else"), "other")
 
     def test_records_every_model_call_with_tokens_and_cost(self):
         reply = AIMessage(content="ok", usage_metadata={"input_tokens": 1000, "output_tokens": 100, "total_tokens": 1100},
                           response_metadata={"model_name": "claude-sonnet-5-5"})
         model = GenericFakeChatModel(messages=iter([reply, reply]))
-        with eval_trace.recording() as log:
+        with eval_calls.recording() as log:
             model.invoke([("system", agent.ACT_PROMPT), ("human", "hi")])
             model.invoke([("system", agent.ACT_PROMPT), ("human", "again")])
         self.assertEqual([c["step"] for c in log.calls], ["agent loop", "agent loop"])
         self.assertEqual(log.calls[0]["input_tokens"], 1000)
         self.assertAlmostEqual(log.calls[0]["dollars"], 0.003)
-        text = eval_trace.table(log.calls)
-        self.assertIn("agent loop 2", text)
-        self.assertIn("0.0060", text)  # total
-        self.assertIn("about 167 emails", text)
 
 
-class EvalMonthlyTests(SimpleTestCase):
-    ROWS = [
-        {"id": "a", "sender": "News <n@x.com>", "labels": "📰 Newsletters", "needs_reply": "no", "checked": "yes", "sender_emails": "30"},
-        {"id": "b", "sender": "Ada <ada@x.com>", "labels": "", "needs_reply": "yes", "checked": "yes", "sender_emails": "1"},
-    ]
 
+class VolumeTests(SimpleTestCase):
     def test_month_starts_cover_full_months_then_this_one(self):
         now = datetime(2026, 11, 22, 15, tzinfo=timezone.utc)
-        starts = eval_monthly.month_starts(now, 2)
+        starts = eval_volume.month_starts(now, 2)
         self.assertEqual([s.strftime("%Y-%m-%d") for s in starts], ["2026-09-01", "2026-10-01", "2026-11-01"])
 
     def test_count_uses_epoch_bounds_and_skips_own_mail(self):
         start, end = datetime(2026, 10, 1, tzinfo=timezone.utc), datetime(2026, 11, 1, tzinfo=timezone.utc)
-        with mock.patch.object(eval_monthly.gmail, "search_ids", return_value=iter(["1", "2", "3"])) as search:
-            self.assertEqual(eval_monthly.count(start, end), 3)
+        with mock.patch.object(eval_volume.gmail, "search_ids", return_value=iter(["1", "2", "3"])) as search:
+            self.assertEqual(eval_volume.count(start, end), 3)
         query = search.call_args.args[0]
         self.assertIn(f"after:{int(start.timestamp())}", query)
         self.assertIn("-from:me", query)
 
-    def write_runs(self, tmp, draft=True):
-        def line(i, needs_reply):
-            predicted = {"labels": "", "urgency": "not_urgent", "needs_reply": needs_reply,
-                         "input_tokens": 1000, "output_tokens": 100}
-            if draft and needs_reply == "yes":
-                predicted["draft"] = {"model": agent.MODEL, "body": "Hi", "input_tokens": 2000, "output_tokens": 200}
-            return json.dumps({"id": i, "predicted": predicted})
-        (Path(tmp) / f"20261123-000001-{pipeline.CLASSIFY_MODEL}.jsonl").write_text(line("a", "no") + "\n" + line("b", "yes"))
-
-    def test_steps_are_measured_or_unknown_never_guessed(self):
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(eval_monthly, "RUNS_DIR", Path(tmp)):
-            self.write_runs(tmp, draft=False)
-            steps = eval_monthly.per_email(self.ROWS)
-        self.assertAlmostEqual(steps["classify"][0], eval_prices.dollars(pipeline.CLASSIFY_MODEL, 1000, 100))
-        self.assertIsNone(steps["draft"][0])
-        self.assertIsNone(steps["agent loop"][0])
-        text = eval_monthly.report([("Oct 2026", 100)], ("Nov 2026", 50, 0.5), steps, ["a", "b"])
-        self.assertIn("≥ $", text)
-        self.assertIn('make eval-trace ID="a b"', text)
-
-    def test_reply_share_is_weighted_and_loop_split_by_reply(self):
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(eval_monthly, "RUNS_DIR", Path(tmp)):
-            self.write_runs(tmp)
-            for name, needs_reply, cost in (("trace-1-a.json", False, 0.01), ("trace-2-b.json", True, 0.05)):
-                (Path(tmp) / name).write_text(json.dumps({"needs_reply": needs_reply, "calls": [
-                    {"step": "agent loop", "dollars": cost}, {"step": "classify", "dollars": 9}]}))
-            steps = eval_monthly.per_email(self.ROWS)
-        share = 1 / 31  # Ada stands for 1 email, the newsletter for 30
-        self.assertAlmostEqual(steps["draft"][0], eval_prices.dollars(agent.MODEL, 2000, 200) * share)
-        self.assertAlmostEqual(steps["agent loop"][0], share * 0.05 + (1 - share) * 0.01)
-        text = eval_monthly.report([("Oct 2026", 100)], ("Nov 2026", 50, 0.5), steps, [])
-        self.assertNotIn("≥", text)
-        self.assertIn("$1 handles about", text)
-        self.assertIn("about 100 by its end", text)
+    def test_counted_again_only_when_missing_or_a_month_old(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.multiple(eval_volume, RUNS_DIR=Path(tmp), VOLUME_FILE=Path(tmp) / "volume.json"), \
+                mock.patch.object(eval_volume, "count_months", return_value=[("Oct", 500), ("Nov", 700)]) as counted, \
+                mock.patch("builtins.print"):
+            self.assertEqual(eval_volume.monthly_emails(), 600)
+            self.assertEqual(eval_volume.monthly_emails(), 600)
+            self.assertEqual(counted.call_count, 1)  # the second call used the saved count
+            old = json.loads((Path(tmp) / "volume.json").read_text())
+            old["counted_at"] = "2020-01-01T00:00:00"
+            (Path(tmp) / "volume.json").write_text(json.dumps(old))
+            eval_volume.monthly_emails()
+            self.assertEqual(counted.call_count, 2)
 
 
 class BenchTests(SimpleTestCase):
@@ -1567,21 +1447,14 @@ class BenchTests(SimpleTestCase):
         self.assertIn("167", eval_bench.table([old_run]))  # computed for runs saved before the metric
 
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(eval_bench, "BENCH_DIR", Path(tmp)), \
-                mock.patch.object(eval_bench, "LEADERBOARD", Path(tmp) / "leaderboard.csv"), \
-                mock.patch.object(eval_bench_compare, "BENCH_DIR", Path(tmp)), \
-                mock.patch.object(eval_bench_compare, "EMAILS_FILE", Path(tmp) / "none.jsonl"):
+                mock.patch.object(eval_bench, "LEADERBOARD", Path(tmp) / "leaderboard.csv"):
             for stamp, name in (("20261123-000001", "current"), ("20261123-000002", "current"), ("20261123-000003", "no-loop")):
                 eval_bench.save({**summary, "name": name, "run": stamp}, recs, stamp)
             self.assertEqual([s["run"] for s in eval_bench.load_runs()], ["20261123-000001", "20261123-000002", "20261123-000003"])
             self.assertEqual(len(list(csv.DictReader((Path(tmp) / "leaderboard.csv").open()))), 3)
-            picked = eval_bench_compare.pick_runs([])
-            self.assertEqual([p.name for p in picked], ["20261123-000002-current", "20261123-000003-no-loop"])
-            page = eval_bench_compare.page(picked)
+            self.assertEqual(eval_bench.find_run("current"), "20261123-000002-current")  # newest of that name
             with self.assertRaises(SystemExit):
-                eval_bench_compare.pick_runs(["nope"])
-        self.assertIn("Hi Ada", page)
-        self.assertIn("$ / month", page)
-        self.assertIn("data-wrong='1'", page)
+                eval_bench.find_run("nope")
 
 
 class SkipIdleLoopTests(SimpleTestCase):
@@ -1635,8 +1508,8 @@ class AsIfNewTests(SimpleTestCase):
         self.assertEqual(self.block(as_if_new=True), "blocked Mon 10:00")
 
     def test_eval_contexts_use_it(self):
-        with mock.patch.object(eval_trace.google_auth, "credentials", return_value=None):
-            self.assertTrue(eval_trace.live_context().as_if_new)
+        with mock.patch.object(eval_calls.google_auth, "credentials", return_value=None):
+            self.assertTrue(eval_calls.live_context().as_if_new)
         self.assertEqual(eval_bench.system()["emails_dated"], "as if just received")
 
 

@@ -136,19 +136,27 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def serve(port: int = 8765, open_browser: bool = True, to_do: bool = False) -> None:
+    """Run the page until Ctrl+C; to_do opens it on the emails not yet reviewed."""
+    if not ANSWERS_FILE.exists():
+        raise SystemExit("No eval_data/answers.csv yet. Run make eval-export first.")
+    url = f"http://127.0.0.1:{port}" + ("/#todo" if to_do else "")
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    print(f"Review page: {url}  (Ctrl+C stops it)")
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopped. Your reviews are saved; reopen the page with make eval-review.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check the eval answers in the browser.")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-open", action="store_true", help="don't open a browser tab")
     args = parser.parse_args()
-    if not ANSWERS_FILE.exists():
-        raise SystemExit("No eval_data/answers.csv yet. Run make eval-export first.")
-    url = f"http://127.0.0.1:{args.port}"
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"Review page: {url}  (Ctrl+C stops it)")
-    if not args.no_open:
-        webbrowser.open(url)
-    server.serve_forever()
+    serve(args.port, not args.no_open)
 
 
 if __name__ == "__main__":

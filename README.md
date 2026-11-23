@@ -68,33 +68,28 @@ make test       # run the tests
 
 Run `make help` to see every command.
 
-### Benchmark
+### Evals
 
-Measures a whole system (classify, labels, calendar, draft, agent loop) on your
-175 checked emails: accuracy against your answers, cost per email and per month.
-Runs in dry run, so Gmail and Calendar never change. It asks before spending.
+Four commands. Your emails, answers and results stay in `eval_data/` and
+`eval_runs/`, both gitignored.
+
+**1. Build the dataset.** Every email is reviewed by you before it counts.
 
 ```bash
-make bench                              # the current system, saved as "current"
-make bench NAME=no-loop AGENT=none      # another system: skip the agent loop
-make bench NAME=loop-always LOOP_ALWAYS=1  # the old setup: agent loop on every email
-make bench NAME=all-sonnet CLASSIFY=sonnet
-make bench-compare                      # newest run of each system, side by side
-make bench-list                         # every run as a table
+make eval-export N=50   # pull 50 new emails, pre-fill with the agent's decisions, open the review page
+make eval-review        # reopen the review page later (http://127.0.0.1:8765)
 ```
 
-### Eval test set
-
-Built from your own emails; everything stays in `eval_data/` (gitignored).
+**2. Benchmark and compare.** A benchmark runs the whole live system (classify,
+labels, calendar, draft, agent loop) on every reviewed email in dry run, so
+Gmail and Calendar never change. It reports accuracy, cost per email, per month
+and emails per $1, and asks before spending.
 
 ```bash
-make eval-export   # pull 300 emails once, drop near-duplicates (max 2 per sender)
-make eval-prefill  # the agent guesses labels, urgency and needs_reply for you to correct
-make eval-review   # local page on http://127.0.0.1:8765 to check each answer
-make eval          # score Haiku, Sonnet and Opus on your checked answers and draft replies (MODEL=haiku for one)
-make eval-compare  # each model's sub-labels and drafts side by side, to judge by eye (no model calls)
-make eval-trace    # tokens and cost of one email through the whole pipeline, in dry run
-make eval-monthly  # emails per month and the estimated monthly cost (no model calls)
+make bench NAME=current                  # the system as the code is now
+make bench NAME=all-sonnet CLASSIFY=sonnet   # the same system with another model for a step
+make bench NAME=no-loop AGENT=none       # partial: skip the agent loop
+make bench-review                        # page: compare two saved runs, flag the prod one
 ```
 
 ## Hosting

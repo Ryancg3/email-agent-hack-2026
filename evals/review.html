@@ -292,6 +292,7 @@ $("filter").onchange = $("search").oninput = () => {
 
 fetch("/api/data").then(r => r.json()).then(data => {
   state = data;
+  if (location.hash === "#todo") $("filter").value = "unchecked";  // opened by make eval-export
   renderProgress();
   select(visibleRows()[0]?.id ?? state.rows[0]?.id);
 });
