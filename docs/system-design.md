@@ -11,16 +11,19 @@ triggers, storage, hosting or the steps per email.
 3. [The life of one email](#the-life-of-one-email)
 4. [From Gmail to the agent: push and polling](#from-gmail-to-the-agent-push-and-polling)
 5. [The scheduler loop](#the-scheduler-loop)
-6. [Connecting a Google account](#connecting-a-google-account)
-7. [Data model](#data-model)
-8. [Choices and trade-offs](#choices-and-trade-offs)
-9. [Where it can fail](#where-it-can-fail)
-10. [Limits that come from outside](#limits-that-come-from-outside)
-11. [Where things live in the code](#where-things-live-in-the-code)
+6. [Labels: the Labels tab and Gmail](#labels-the-labels-tab-and-gmail)
+7. [Connecting a Google account](#connecting-a-google-account)
+8. [Data model](#data-model)
+9. [Dry run, evals and the demo](#dry-run-evals-and-the-demo)
+10. [Choices and trade-offs](#choices-and-trade-offs)
+11. [Where it can fail](#where-it-can-fail)
+12. [Limits that come from outside](#limits-that-come-from-outside)
+13. [Where things live in the code](#where-things-live-in-the-code)
 
 ## The system in one paragraph
 
-A user signs up on the website and connects their Google account. From then on, every
+A user signs up on the website, connects their Google account and describes their
+labels on the Labels tab. From then on, every
 new email in their inbox is handled by the agent: Claude picks labels and an urgency,
 code applies the labels and blocks calendar time to reply (within the hour for
 super-urgent emails, otherwise next to other email time), Claude drafts a reply if someone is waiting for one, and Claude may take a few
@@ -56,26 +59,28 @@ flowchart LR
 
     U -- "HTTPS" --> WEB
     WEB -- "connect account" --> OAUTH
+    WEB -- "Labels tab: list<br/>and create labels" --> GM
     PS -- "POST /gmail/push/" --> WEB
     GM -- "inbox changed" --> PS
-    SCH -- "read, label, draft,<br/>renew watch" --> GM
+    SCH -- "read, label, draft,<br/>renew watch, reminder" --> GM
     SCH -- "find free time,<br/>block time" --> CAL
     SCH -- "classify, draft, act" --> ANT
 ```
 
 | Part | What it is | What it does |
 |---|---|---|
-| **Website** | Django, served by gunicorn (1 worker, 4 threads) | Sign-up, login, dashboard, label editor, Google connect, "Run now", and the Pub/Sub webhook. Only does quick work. |
-| **Scheduler** | `python manage.py run_scheduler`, a plain `while True` loop | All the slow work: running the agent, renewing Gmail watches, monthly sub-label cleanup. |
+| **Website** | Django, served by gunicorn (1 worker, 4 threads) | Sign-up, login, dashboard, label editor, Google connect, "Run now", and the Pub/Sub webhook. Only does quick work: a few Gmail label calls at most (listing labels, creating missing ones), never Claude. |
+| **Scheduler** | `python manage.py run_scheduler`, a plain `while True` loop | All the slow work: running the agent, renewing Gmail watches, the day-6 reconnect reminder, monthly sub-label cleanup. |
 | **Database** | One SQLite file on a Railway volume | Users, their labels, Google connections, and a record of every email handled. Also the job queue (see [choice 3](#choices-and-trade-offs)). |
 | **Container** | `Dockerfile` + `deploy/start.sh` | Runs migrations, then starts the website and the scheduler side by side. If either one exits, the container exits and Railway restarts it. |
 | **Google** | OAuth, Gmail, Calendar, Pub/Sub | Each user's mail and calendar, accessed with their own refresh token. Scopes: `gmail.modify`, `calendar.readonly`, `calendar.events`. |
-| **Anthropic** | Claude through `langchain-anthropic` | Classification, reply drafting, the extra-actions tool loop, and sub-label cleanup decisions. |
+| **Anthropic** | Claude through `langchain-anthropic` (`triage/llm.py`) | Classification (Haiku), reply drafting and the extra-actions tool loop (Sonnet), and sub-label cleanup decisions. Takes an API key (`ANTHROPIC_API_KEY`) or a bearer token (`ANTHROPIC_AUTH_TOKEN`). |
 
 Hosting on Render instead works the same way (`render.yaml`, [deploy-render.md](deploy-render.md)).
 Locally, `make dev` runs the website and the scheduler against `./app.db`, and
 `make agent` runs the agent once from the CLI for the `token.json` account, with no
-website or database.
+website or database. `make demo` runs the website against a fake Gmail (see
+[Dry run, evals and the demo](#dry-run-evals-and-the-demo)).
 
 ## The life of one email
 
@@ -85,8 +90,9 @@ flowchart TD
     T2["Poll<br/>(every 5 min, or 30 min<br/>when push works)"] --> PICK
     T3["Run now button<br/>(reprocesses newest 5)"] --> PICK
 
-    PICK["Scheduler picks the user"] --> FIND["Find new emails<br/>newest 100 inbox ids after connecting,<br/>minus those in ProcessedEmail,<br/>oldest first, at most 10"]
-    FIND --> CLS["1. Classify (Claude, one call)<br/>0 to 3 labels with sub-labels, urgency,<br/>minutes needed, needs_reply"]
+    PICK["Scheduler picks the user"] --> LIST["Read Gmail's labels<br/>import new top-level ones as rows,<br/>stop the run if Gmail has none"]
+    LIST --> FIND["Find new emails<br/>newest 100 inbox ids after connecting,<br/>minus those in ProcessedEmail,<br/>oldest first, at most 10"]
+    FIND --> CLS["1. Classify (Claude Haiku, one call)<br/>0 to 3 labels with sub-labels, urgency,<br/>minutes needed, needs_reply"]
     CLS --> LBL["2. Apply labels (code)<br/>at most 3, sub-labels one level deep,<br/>created if new"]
     LBL --> URG{"urgency"}
     URG -- "not_urgent" --> NR
@@ -94,16 +100,24 @@ flowchart TD
     URG -- "instant" --> BLKU["Block reply time (code)<br/>first free time,<br/>within the hour if meetings allow"] --> NR
     NR{"needs_reply?"}
     NR -- "yes" --> HAS{"thread already<br/>has a draft?"}
-    HAS -- "no" --> DRF["3. Draft reply (Claude)<br/>write-reply skill,<br/>saved as a Gmail draft"] --> ACT
-    HAS -- "yes" --> ACT
-    NR -- "no" --> ACT
-    ACT["4. Extra actions (Claude tool loop)<br/>only when a reply or calendar time is needed<br/>at most 5 model calls, one tool at a time:<br/>apply_label, block_time,<br/>find_free_slots"]
+    HAS -- "no" --> DRF["3. Draft reply (Claude Sonnet)<br/>write-reply skill,<br/>saved as a Gmail draft"] --> LOOP
+    HAS -- "yes" --> LOOP
+    NR -- "no" --> LOOP
+    LOOP{"reply or calendar<br/>time needed?"}
+    LOOP -- "yes" --> ACT["4. Extra actions (Claude Sonnet tool loop)<br/>at most 5 model calls, one tool at a time:<br/>apply_label, block_time,<br/>find_free_slots"]
+    LOOP -- "no" --> SAVE
     ACT --> SAVE[("Save ProcessedEmail<br/>subject, labels, urgency, ok or error")]
 ```
 
 Steps 1 to 3 are the **required minimum**: code always runs them, in that order, so
 they happen even if Claude takes no extra steps. Step 4 is Claude's own choice and is
-often empty. The labels Claude may pick, and what each one is for, come from the
+often empty, so it only runs when there is something to act on: a reply, or time to
+block in the calendar. Newsletters, receipts and alerts skip it (`SKIP_IDLE_LOOP` in
+`triage/pipeline.py`).
+
+"Run now" reprocesses the newest 5 inbox emails, done or not, except the agent's own
+reminder emails (`ProcessedEmail` status `skipped`, see
+[The scheduler loop](#the-scheduler-loop)). The labels Claude may pick, and what each one is for, come from the
 user's label descriptions on the Labels page (new users start from
 [triage/labels.md](../triage/labels.md)).
 
@@ -146,8 +160,9 @@ Emails more than 5 days old (`MAX_BLOCK_AGE` in `triage/actions.py`) are never b
 rerunning the agent over old mail (`make agent N=200`) adds no reply time to the
 calendar. Labels and drafts are still applied as usual.
 
-Typical time per email: 10 to 30 seconds of Claude work (two or three calls, plus
-the tool loop).
+Claude calls per email: one Haiku call for every email; one Sonnet call for the draft
+when a reply is needed; and up to 5 Sonnet calls in the tool loop when a reply or
+calendar time is needed. Emails that need neither cost a single Haiku call.
 
 ## From Gmail to the agent: push and polling
 
@@ -168,6 +183,7 @@ sequenceDiagram
     Note over S: next tick, at most 10 s later
     S->>D: who has push_received_at set?
     S->>D: clear the flag
+    S->>G: list labels (import new ones)
     S->>G: newest inbox ids
     S->>D: which of these are already in ProcessedEmail?
     loop each new email, oldest first, max 10
@@ -204,7 +220,8 @@ flowchart TD
     TICK["Tick"] --> DUE{"5 minutes since<br/>the last poll?"}
     DUE -- "yes" --> RUNP["Run the agent for users who:<br/>clicked Run now, or<br/>got a push, or<br/>are due a poll"]
     DUE -- "no" --> RUN["Run the agent for users who:<br/>clicked Run now, or<br/>got a push"]
-    RUNP --> WATCH
+    RUNP --> REM["Reconnect reminder for users<br/>whose Google access is 6 days old"]
+    REM --> WATCH
     RUN --> WATCH
     WATCH["Renew Gmail watches that are due<br/>(daily; retry hourly on failure)"] --> CLEAN
     CLEAN["Sub-label cleanup for users due<br/>(every 30 days, or the button)"] --> SLEEP
@@ -215,12 +232,54 @@ Everything in one tick runs in sequence: one user at a time, one email at a time
 Only users whose agent is enabled and whose Google connection is `connected` are run
 (Run now works even with the agent switched off).
 
+**Reconnect reminder** (`accounts/reminder.py`). While the Google OAuth app is in
+Testing mode, Google expires refresh tokens 7 days after each grant. On day 6, on a
+poll tick, the scheduler puts a reminder email with a reconnect link into the user's
+own inbox. It is inserted, not sent, so nothing leaves the mailbox. It is saved as a
+`ProcessedEmail` with status `skipped`, so the agent never labels it or blocks time
+for it, not even on "Run now". One reminder per grant: reconnecting resets
+`authorized_at` and allows the next one. If Google already refuses the token, the
+connection becomes `reconnect_needed` and the dashboard banner takes over.
+
 **Sub-label cleanup** is a separate, monthly job (`triage/sublabel_cleanup.py`). Code picks
 sub-labels that have gone quiet, Claude decides keep or delete for each, and each
 decision is saved as a `SublabelReview`. It only deletes when the user has turned
 cleanup on; otherwise it reports what it would delete. Its errors never touch the
 email agent's status, and the other way round. Details:
 [archive/sublabel-cleanup-spec.md](archive/sublabel-cleanup-spec.md).
+
+## Labels: the Labels tab and Gmail
+
+Claude picks labels from **Gmail's** label list, read fresh on every run, not from the
+database. The database only holds what each label is for (the descriptions on the
+Labels tab). So a label has to exist in both places to be used well, and
+`accounts/label_sync.py` adds what's missing on either side. It only ever adds:
+renaming or deleting a label on one side never changes the other.
+
+```mermaid
+flowchart LR
+    TAB["Labels tab<br/>(Label rows)"]
+    GM["Gmail labels"]
+    TAB -- "push: on save of a new row,<br/>the Create in Gmail button,<br/>or make labels" --> GM
+    GM -- "import: on opening the Labels tab<br/>and at the start of every agent run" --> TAB
+```
+
+- **Push** (`push_to_gmail`). Creates each row Gmail doesn't have yet, as
+  "emoji name". Labels are matched on their letters only, the same way the "Not in
+  Gmail" badge on the Labels tab matches them. It never raises; problems show as
+  messages on the page.
+- **Import** (`import_from_gmail`). Adds a row for each top-level Gmail label that
+  is new since the last look and not described yet, so the user can describe it.
+  `GoogleConnection.seen_label_ids` holds the label ids seen so far, so deleting a row
+  doesn't bring it back while its Gmail label stays. The first look only records what's
+  there; older undescribed labels are offered by the "Add them" button instead.
+  Sub-labels, names too long for the editor, and labels past the per-user maximum are
+  not imported.
+- **Concurrency.** The Labels tab and an agent run can import at the same moment. The
+  import runs in one transaction and SQLite takes its write lock when a transaction
+  starts (`transaction_mode` `IMMEDIATE`), so the second import waits and sees the first
+  one's rows. `seen_label_ids` only grows, so an older Gmail list saved after a newer
+  one can't drop ids.
 
 ## Connecting a Google account
 
@@ -290,6 +349,8 @@ erDiagram
         text refresh_token "Fernet-encrypted"
         string status "connected or reconnect_needed"
         datetime connected_at "only later emails count"
+        datetime authorized_at "last grant, for the 7-day expiry"
+        datetime reconnect_reminder_sent_at
         datetime last_run_at
         text last_error
         datetime push_received_at "the queue flag"
@@ -298,11 +359,12 @@ erDiagram
         text watch_error
         datetime last_cleanup_at
         text last_cleanup_error
+        json seen_label_ids "top-level Gmail label ids seen"
     }
     ProcessedEmail {
         string message_id "unique per user"
         datetime processed_at
-        string status "ok or error"
+        string status "ok, error or skipped"
         string subject
         string labels "one per line"
         string urgency "not_urgent, schedule_time, instant"
@@ -312,6 +374,7 @@ erDiagram
         string label_id
         string label_name "Parent/Child"
         int threads
+        datetime last_email_at
         string decision "keep, delete, would_delete, error"
         text reason
         date recheck_after
@@ -323,12 +386,44 @@ What lives where:
 
 - **In the database:** who the users are, what each label means to them, how to reach
   their Google account, and a log of what the agent did. `ProcessedEmail` doubles as
-  the "already done" list that makes runs safe to repeat.
+  the "already done" list that makes runs safe to repeat; rows with status `skipped`
+  are the agent's own reminder emails.
 - **In Gmail and Calendar:** everything the user sees. Labels, sub-labels, drafts and
   calendar blocks are real Gmail and Calendar objects. The app keeps no copy of email
   content; it reads each email, sends it to Claude, and keeps only the subject.
 - **In the repo:** the default labels (`triage/labels.md`), the reply-writing instructions
   (`triage/skills/write-reply/SKILL.md`), and the prompts (`triage/pipeline.py`, `triage/agent.py`).
+
+## Dry run, evals and the demo
+
+Three ways to run the system without changing a real inbox.
+
+| Mode | Command | What's real | What's fake |
+|---|---|---|---|
+| **Dry run** (eval mode) | `make agent N=50 DRY_RUN=1` | Gmail and Calendar reads, Claude calls | Every write: labels, sub-labels, drafts, calendar blocks |
+| **Benchmark** | `make bench NAME=...` | Same as dry run, over the reviewed test set | Same as dry run |
+| **Demo** | `make demo` | The website and its own `demo.db` | Gmail (in memory), Google credentials; no Claude calls |
+
+**Dry run.** `RunContext.dry_run` is checked in the Gmail and Calendar wrappers
+(`triage/gmail.py`, `triage/gcal.py`), so the pipeline and the tool loop run
+unchanged. Each write is recorded in `RunContext.would_do` instead, and later reads
+in the same run see it: a simulated sub-label is reused by the next email, a thread
+with a simulated draft gets no second draft, and a simulated calendar block takes its
+slot. The CLI saves the would-be writes to `eval_runs/`.
+
+**Evals** (`evals/`). `make eval-export` pulls emails into a test set that the user
+reviews on a local page; `make bench` runs the whole system over it in dry run and
+reports accuracy and cost per step, per email, per month and emails per dollar.
+Benchmarks set `RunContext.as_if_new`, so old test emails are treated as just
+received (no 5-day limit on calendar blocks, and an earlier real block for the email
+is ignored). Data stays in the gitignored `eval_data/` and `eval_runs/`, and
+`.dockerignore` keeps it out of images. The local review pages listen on `127.0.0.1`
+and refuse requests whose `Host` (or, for writes, `Origin`) is another site, so a web
+page can't read the exported emails through DNS rebinding.
+
+**Demo** (`accounts/demo.py`). Swaps `gmail.list_labels`, `gmail.create_label` and the
+Google credentials for in-memory fakes and serves the website on port 8765. It is for
+trying UI changes, such as the Labels tab, without a Google account.
 
 ## Choices and trade-offs
 
@@ -348,6 +443,10 @@ What lives where:
 | 12 | **Drafts only, never send** | A wrong draft costs the user a delete; a wrong sent email can't be undone. | Users who want true autopilot. | Per-label opt-in to sending, with a delay to cancel. |
 | 13 | **Each step is safe to repeat** | A crash or rerun mid-email must not duplicate work. Labels are idempotent, a draft is skipped if the thread has one, a calendar block is found by its message id. | An extra action without its own check, if one is added later. | Record each extra action and skip repeats. |
 | 14 | **Structured output for every one-shot Claude call** | Claude's native JSON schema mode; the label list is an enum built from Gmail per run, so Claude can't invent a top-level label. | Very long label lists make the schema large. | None needed yet. |
+| 15 | **Haiku classifies, Sonnet drafts and acts** | In the SHY-12 benchmark (175 emails) Haiku matched Sonnet on labels and urgency at about 1/16 of the cost. | Labels whose descriptions need finer judgement than Haiku gives. | Rerun `make bench` with `CLASSIFY=sonnet` and compare. |
+| 16 | **Tool loop only when a reply or calendar time is needed** | For newsletters, receipts and alerts the loop almost always ended with "nothing more needed". Skipping it took the same benchmark from 105 to 811 emails per dollar, accuracy unchanged. | An extra action that would help on emails that need neither. | `SKIP_IDLE_LOOP = False` in `triage/pipeline.py`. |
+| 17 | **Labels tab and Gmail only add to each other** | A rename or delete on one side can't wipe out the other side's labels or descriptions by mistake. | A label renamed in Gmail loses its description until the user renames the row too. | Track Gmail label ids on each row and follow renames. |
+| 18 | **Dry run in the Gmail and Calendar wrappers** | One switch covers the pipeline, the tool loop and every future action, with no second code path to keep in step. | A write that bypasses the wrappers. | None needed. |
 
 ## Where it can fail
 
@@ -355,15 +454,15 @@ What breaks, what the user sees, what the app does about it, and how to fix it.
 
 | What fails | What the user sees | What the app does | Fix |
 |---|---|---|---|
-| **Google sign-out every 7 days.** OAuth apps in *Testing* mode get refresh tokens that expire after 7 days. | Dashboard: "Reconnect Google". The agent stops for that user. | Catches `RefreshError`, sets the connection to `reconnect_needed`, and skips the user until they reconnect. | Publish the OAuth app (Google Cloud → OAuth consent screen → *In production*). Until then, reconnect weekly. |
+| **Google sign-out every 7 days.** OAuth apps in *Testing* mode get refresh tokens that expire after 7 days. | On day 6, a reminder email in their inbox with a reconnect link. After day 7, dashboard: "Reconnect Google", and the agent stops for that user. | Puts the day-6 reminder in the inbox. Catches `RefreshError`, sets the connection to `reconnect_needed`, and skips the user until they reconnect. | Publish the OAuth app (Google Cloud → OAuth consent screen → *In production*). Until then, reconnect weekly. |
 | **User revokes access** in their Google account. | Same as above. | Same as above. | Reconnect. |
 | **Two copies running** (a second replica, a second deploy, or `make dev` locally while the hosted app runs). | Possible double drafts or calendar blocks when both handle the same email at the same moment. | Nothing stops it: each copy has its own database. The "thread has a draft" and "block exists" checks catch most repeats, but not a true race. | Keep one replica (`railway.json` sets `numReplicas: 1`). Don't connect the same Google account locally and on the server. |
 | **Container restarts** (deploy, crash, Railway maintenance). | Nothing, or a delay of a few seconds. | Pub/Sub retries pings that got no answer. An email interrupted mid-way has no `ProcessedEmail` yet, so the next run redoes it; every step is safe to repeat ([choice 13](#choices-and-trade-offs)). | None needed. |
 | **Push ping lost**, or the watch can't be created (wrong topic, missing Publisher grant). | Emails handled in up to 30 minutes instead of seconds. A broken watch shows on the dashboard with "polling instead". | Lost ping: the 30-minute fallback poll catches it. Broken watch: polls every 5 minutes, retries the watch hourly. | Fix the Pub/Sub setup ([gmail-push.md](gmail-push.md)). |
 | **Gmail quota or server errors** (429, 5xx). | Slower runs. | Each Gmail call retries 8 times with backoff (about 4 minutes in total). If it still fails, that email is saved as `error` and is **not** retried automatically. | "Run now" reprocesses the newest 5 emails. |
-| **Anthropic errors** (rate limit, overload, outage, bad key). | Dashboard shows the error; new emails wait. | LangChain retries twice. Then the run stops without saving the email, so the next run (push or poll) tries it again. | Wait, or check the API key and usage limits. |
+| **Anthropic errors** (rate limit, overload, outage, bad key). | Dashboard shows the error; new emails wait. | LangChain retries twice. Then the run stops without saving the email, so the next run (push or poll) tries it again. | Wait, or check the API key and usage limits (`make check-key`). |
 | **Claude refuses or returns unusable output.** | That email shows as `error` on the dashboard. | Saved as `error`, not retried. The run continues with the next email. | "Run now", or handle the email by hand. |
-| **No labels in Gmail**, or labels renamed so they no longer match their descriptions. | Dashboard error "No labels in Gmail", or emails labelled less well. | Stops the run, or logs a warning per mismatch. | Create the labels in Gmail; use "Add missing labels" on the Labels page. |
+| **No labels in Gmail**, or labels renamed so they no longer match their descriptions. | Dashboard error "No labels in Gmail", or emails labelled less well. The Labels tab marks rows "Not in Gmail". | Stops the run, or logs a warning per mismatch. A label renamed in Gmail keeps its id, so it is not imported again; it shows under "In Gmail but not described". | "Create in Gmail" on the Labels tab (or `make labels`), or rename the row to match Gmail. |
 | **More than 100 new emails between two runs.** | The oldest ones are never handled. | Only the newest 100 inbox ids are checked (`LOOKBACK`). | Rare with push. Raise `LOOKBACK` or switch to `history.list` ([choice 6](#choices-and-trade-offs)). |
 | **Volume missing or not mounted.** | Every deploy wipes all accounts and connections. | SQLite falls back to the container's own disk. | Mount a volume at `/data` ([deploy-railway.md](deploy-railway.md)). |
 | **`TOKEN_KEY` changed or lost.** | Everyone has to reconnect Google. | Stored refresh tokens can no longer be decrypted. **Known gap:** the decrypt happens outside the run's error handling, so the scheduler crashes and the container restarts in a loop until the connections are removed. | Keep `TOKEN_KEY` safe. If it changed, delete the `GoogleConnection` rows (admin) and reconnect. |
@@ -384,14 +483,19 @@ What breaks, what the user sees, what the app does about it, and how to fix it.
 | The agent step (tool loop, 5-step limit) | `triage/agent.py` |
 | Actions the code and Claude call | `triage/actions.py` |
 | Google API wrappers | `triage/gmail.py`, `triage/gcal.py`, `triage/google_auth.py` (CLI only) |
-| Whose account a run uses | `triage/run_context.py` |
+| Whose account a run uses, dry run | `triage/run_context.py` |
+| Claude client and credential | `triage/llm.py` |
 | Label descriptions | `triage/labels.py`, `triage/labels.md`, `accounts.models.Label` |
+| Labels tab and Gmail sync | `accounts/label_sync.py`, `accounts/management/commands/push_labels.py` |
 | Reply-writing instructions | `triage/skills/write-reply/SKILL.md` |
 | Running the agent for one web user | `accounts/runner.py` |
 | Scheduler loop | `accounts/management/commands/run_scheduler.py` |
 | Gmail push (webhook, watches) | `accounts/push.py`, `accounts/views.py` (`gmail_push`) |
 | Google connect (OAuth web flow, token encryption) | `accounts/google_connect.py`, `accounts/views.py` |
 | Sub-label cleanup | `triage/sublabel_cleanup.py`, `accounts/cleanup_runner.py` |
+| Reconnect reminder | `accounts/reminder.py` |
+| Evals and benchmarks | `evals/` |
+| Demo with a fake Gmail | `accounts/demo.py` |
 | Data model | `accounts/models.py` |
 | Hosting | `Dockerfile`, `deploy/start.sh`, `railway.json`, `render.yaml` |
 
