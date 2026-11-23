@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Eval review</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1d2129; --muted: #667085; --line: #e4e7ec;
+    --accent: #2156d9; --accent-soft: #e8efff; --ok: #157a4a; --warn: #b54708; --danger: #c4320a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111318; --panel: #1a1d24; --text: #e6e8ec; --muted: #98a2b3; --line: #2c313c;
+            --accent: #7aa2ff; --accent-soft: #1f2a44; --ok: #4ade80; --warn: #fbbf24; --danger: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; gap: 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+  header h1 { font-size: 15px; margin: 0; }
+  .progress { flex: 1; display: flex; align-items: center; gap: 10px; color: var(--muted); }
+  .bar { flex: 1; max-width: 320px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--ok); width: 0; transition: width .2s; }
+  select, input, textarea, button { font: inherit; color: inherit; }
+  select, input[type=search], input[type=text], textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .layout { display: grid; grid-template-columns: 300px 1fr 360px; height: calc(100vh - 49px); }
+  .list { overflow-y: auto; border-right: 1px solid var(--line); background: var(--panel); }
+  .item { padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer; display: grid; grid-template-columns: 16px 1fr; gap: 6px; }
+  .item:hover { background: var(--bg); }
+  .item.active { background: var(--accent-soft); }
+  .item .subject { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .sender { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tick { color: var(--muted); font-weight: 700; }
+  .item.done { background: color-mix(in srgb, var(--ok) 13%, var(--panel)); box-shadow: inset 3px 0 var(--ok); }
+  .item.done .tick { color: var(--ok); }
+  .item.active { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .done-toggle { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-weight: 600; user-select: none; }
+  .done-toggle input { width: 18px; height: 18px; accent-color: var(--ok); margin: 0; }
+  .done-toggle.on { border-color: var(--ok); color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, var(--panel)); }
+  .email { overflow-y: auto; padding: 20px 24px; }
+  .email h2 { margin: 0 0 8px; font-size: 18px; }
+  .meta { color: var(--muted); font-size: 13px; display: grid; grid-template-columns: 56px 1fr; gap: 2px 8px; margin-bottom: 14px; }
+  .meta a { color: var(--accent); }
+  .body { white-space: pre-wrap; word-break: break-word; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; font-size: 13px; }
+  .form { overflow-y: auto; border-left: 1px solid var(--line); background: var(--panel); padding: 16px; display: flex; flex-direction: column; gap: 18px; }
+  .form h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  @media (prefers-color-scheme: dark) { .chip.on { color: #0b1020; } }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; border: 0; background: var(--panel); padding: 7px 4px; cursor: pointer; border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  @media (prefers-color-scheme: dark) { .seg button.on { color: #0b1020; } }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; color: var(--muted); }
+  .on kbd, .primary kbd { color: inherit; border-color: currentColor; opacity: .75; }
+  .warn { color: var(--warn); font-size: 12px; margin-top: 6px; }
+  .error { color: var(--danger); font-size: 13px; min-height: 18px; }
+  .actions { display: flex; gap: 8px; }
+  .primary { flex: 1; background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 9px; cursor: pointer; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { .primary { color: #0b1020; } }
+  .ghost { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; cursor: pointer; }
+  textarea { width: 100%; min-height: 54px; resize: vertical; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .empty { padding: 40px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Eval review</h1>
+  <div class="progress"><div class="bar"><div id="bar"></div></div><span id="count"></span></div>
+  <select id="filter">
+    <option value="all">All</option>
+    <option value="unchecked">To do</option>
+    <option value="checked">Done</option>
+    <option value="urgent">Not "not_urgent"</option>
+    <option value="reply">Needs reply</option>
+  </select>
+  <input id="search" type="search" placeholder="Search subject or sender">
+</header>
+<div class="layout">
+  <nav class="list" id="list"></nav>
+  <main class="email" id="email"></main>
+  <aside class="form" id="form"></aside>
+</div>
+
+<template id="form-template">
+  <label class="done-toggle" id="done-toggle"><input type="checkbox" id="done"> <span id="done-text">Done</span> <kbd>d</kbd></label>
+  <section>
+    <h3>Labels</h3>
+    <div class="chips" id="chips"></div>
+    <div class="warn" id="label-warn"></div>
+  </section>
+  <section>
+    <h3>Urgency</h3>
+    <div class="seg" id="urgency"></div>
+  </section>
+  <section>
+    <h3>Needs reply</h3>
+    <div class="seg" id="reply"></div>
+  </section>
+  <section>
+    <h3>Notes</h3>
+    <textarea id="notes" placeholder="Optional: why, or what makes this one tricky"></textarea>
+  </section>
+  <div class="error" id="error"></div>
+  <div class="actions">
+    <button class="ghost" id="prev" title="Previous (k)">↑</button>
+    <button class="ghost" id="next" title="Next (j)">↓</button>
+    <button class="primary" id="save">Done &amp; next <kbd>Enter</kbd></button>
+  </div>
+  <p class="hint">Keys: <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> urgency · <kbd>y</kbd>/<kbd>n</kbd> reply · <kbd>0</kbd> no label · <kbd>j</kbd>/<kbd>k</kbd> next/previous · <kbd>d</kbd> done on/off · <kbd>Enter</kbd> done &amp; next</p>
+</template>
+
+<script>
+const MAX_LABELS = 3;
+const URGENCY_NAMES = { not_urgent: "Not urgent", schedule_time: "Schedule time", instant: "Instant" };
+const $ = id => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+};
+
+let state = { rows: [], emails: {}, options: { top: [] }, urgencies: [] };
+let currentId = null;
+let draft = null;  // { labels: Set of label names, urgency, needs_reply, notes }
+
+function parseLabels(text) {
+  return new Set(text.split("; ").filter(Boolean).map(name => name.split("/")[0]));
+}
+
+function visibleRows() {
+  const filter = $("filter").value, query = $("search").value.toLowerCase();
+  return state.rows.filter(row => {
+    if (filter === "unchecked" && row.checked === "yes") return false;
+    if (filter === "checked" && row.checked !== "yes") return false;
+    if (filter === "urgent" && row.urgency === "not_urgent") return false;
+    if (filter === "reply" && row.needs_reply !== "yes") return false;
+    return !query || (row.subject + " " + row.sender).toLowerCase().includes(query);
+  });
+}
+
+function renderProgress() {
+  const done = state.rows.filter(r => r.checked === "yes").length;
+  $("count").textContent = `${done} of ${state.rows.length} done`;
+  $("bar").style.width = state.rows.length ? `${100 * done / state.rows.length}%` : "0";
+}
+
+function renderList() {
+  const list = $("list");
+  list.replaceChildren();
+  for (const row of visibleRows()) {
+    const done = row.checked === "yes";
+    const item = el("div", { className: "item" + (done ? " done" : "") + (row.id === currentId ? " active" : "") },
+      el("span", { className: "tick", textContent: done ? "✓" : "○" }),
+      el("div", {},
+        el("div", { className: "subject", textContent: row.subject || "(no subject)" }),
+        el("div", { className: "sender", textContent: `${row.urgency === "not_urgent" ? "" : "⚡ "}${row.sender}` })));
+    item.onclick = () => select(row.id);
+    list.append(item);
+  }
+  list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+}
+
+function renderEmail() {
+  const box = $("email");
+  const row = state.rows.find(r => r.id === currentId);
+  if (!row) {
+    box.replaceChildren(el("div", { className: "empty", textContent: "Nothing left in this view. Pick another filter." }));
+    $("form").replaceChildren();
+    return;
+  }
+  const email = state.emails[row.id] || {};
+  const link = `https://mail.google.com/mail/?authuser=${encodeURIComponent(row.account)}#all/${row.id}`;
+  const meta = el("div", { className: "meta" });
+  for (const [key, value] of [["From", row.sender], ["To", email.to], ["Cc", email.cc], ["Date", row.date], ["Account", row.account]]) {
+    if (value) meta.append(el("span", { textContent: key }), el("span", { textContent: value }));
+  }
+  meta.append(el("span"), el("span", {}, el("a", { href: link, target: "_blank", rel: "noopener", textContent: "Open in Gmail ↗" })));
+  box.replaceChildren(el("h2", { textContent: row.subject || "(no subject)" }), meta,
+    el("div", { className: "body", textContent: email.body || "(no body)" }));
+  box.scrollTop = 0;
+}
+
+function renderLabels() {
+  const chips = $("chips");
+  chips.replaceChildren();
+  const none = el("button", { className: "chip" + (draft.labels.size ? "" : " on"), textContent: "No label" });
+  none.onclick = () => { draft.labels.clear(); renderLabels(); };
+  chips.append(none);
+  for (const name of state.options.top) {
+    const chip = el("button", { className: "chip" + (draft.labels.has(name) ? " on" : ""), textContent: name });
+    chip.onclick = () => {
+      draft.labels.has(name) ? draft.labels.delete(name) : draft.labels.add(name);
+      renderLabels();
+    };
+    chips.append(chip);
+  }
+  $("label-warn").textContent = draft.labels.size > MAX_LABELS ? `${draft.labels.size} labels: the agent applies at most ${MAX_LABELS}.` : "";
+}
+
+function renderSeg(id, values, names, key) {
+  const seg = $(id);
+  seg.replaceChildren();
+  values.forEach((value, i) => {
+    const hint = key === "urgency" ? String(i + 1) : value[0];
+    const button = el("button", { className: draft[key] === value ? "on" : "" }, names[value] + " ", el("kbd", { textContent: hint }));
+    button.onclick = () => { draft[key] = value; renderSeg(id, values, names, key); };
+    seg.append(button);
+  });
+}
+
+function renderForm() {
+  const row = state.rows.find(r => r.id === currentId);
+  if (!row) return;
+  $("form").replaceChildren($("form-template").content.cloneNode(true));
+  renderLabels();
+  renderSeg("urgency", state.urgencies, URGENCY_NAMES, "urgency");
+  renderSeg("reply", ["yes", "no"], { yes: "Yes", no: "No" }, "needs_reply");
+  $("notes").value = draft.notes;
+  $("notes").oninput = e => draft.notes = e.target.value;
+  $("save").onclick = () => save();
+  const done = row.checked === "yes";
+  $("done").checked = done;
+  $("done-toggle").classList.toggle("on", done);
+  $("done-text").textContent = done ? "Done" : "Mark as done";
+  $("done").onchange = () => save({ done: $("done").checked, advance: false });
+  $("prev").onclick = () => move(-1);
+  $("next").onclick = () => move(1);
+}
+
+function select(id) {
+  currentId = id;
+  const row = state.rows.find(r => r.id === id);
+  draft = row && { labels: parseLabels(row.labels), urgency: row.urgency, needs_reply: row.needs_reply, notes: row.notes };
+  renderList(); renderEmail(); renderForm();
+}
+
+function move(step) {
+  const rows = visibleRows();
+  const i = rows.findIndex(r => r.id === currentId);
+  const next = rows[Math.min(Math.max(i + step, 0), rows.length - 1)];
+  if (next) select(next.id);
+}
+
+async function save({ done = true, advance = true } = {}) {
+  // The email being saved, fixed now: the reviewer may move on before the server answers.
+  const savedId = currentId;
+  const labels = [...draft.labels];
+  const before = visibleRows();
+  const response = await fetch("/api/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: savedId, labels, urgency: draft.urgency, needs_reply: draft.needs_reply, notes: draft.notes, done }),
+  });
+  const result = await response.json();
+  const stillHere = currentId === savedId;
+  if (!response.ok) {
+    if (stillHere) { renderForm(); $("error").textContent = result.error; }
+    else alert(`Not saved: ${result.error}`);
+    return;
+  }
+  Object.assign(state.rows.find(r => r.id === savedId), result);
+  renderProgress();
+  if (!stillHere) { renderList(); return; }  // the reviewer already moved on: just show the tick
+  if (!advance) { renderList(); renderForm(); return; }
+  // The next email after the saved one, among those still in view.
+  const i = before.findIndex(r => r.id === savedId);
+  const after = visibleRows();
+  const next = before.slice(i + 1).find(r => after.includes(r)) || after[0];
+  next ? select(next.id) : (currentId = null, renderList(), renderEmail());
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); return save(); }
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName) || !draft) return;
+  const urgency = { "1": "not_urgent", "2": "schedule_time", "3": "instant" }[e.key];
+  if (urgency) { draft.urgency = urgency; renderSeg("urgency", state.urgencies, URGENCY_NAMES, "urgency"); }
+  else if (e.key === "y" || e.key === "n") { draft.needs_reply = e.key === "y" ? "yes" : "no"; renderSeg("reply", ["yes", "no"], { yes: "Yes", no: "No" }, "needs_reply"); }
+  else if (e.key === "0") { draft.labels.clear(); renderLabels(); }
+  else if (e.key === "d") { const row = state.rows.find(r => r.id === currentId); save({ done: row.checked !== "yes", advance: false }); }
+  else if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); move(1); }
+  else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+  else if (e.key === "Enter") { e.preventDefault(); save(); }
+});
+$("filter").onchange = $("search").oninput = () => {
+  const rows = visibleRows();
+  if (!rows.some(r => r.id === currentId)) select(rows[0]?.id ?? null);
+  else renderList();
+};
+
+fetch("/api/data").then(r => r.json()).then(data => {
+  state = data;
+  if (location.hash === "#todo") $("filter").value = "unchecked";  // opened by make eval-export
+  renderProgress();
+  select(visibleRows()[0]?.id ?? state.rows[0]?.id);
+});
+</script>
+</body>
+</html>

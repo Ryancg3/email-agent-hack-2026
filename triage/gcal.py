@@ -35,6 +35,21 @@ def _timezone() -> ZoneInfo:
     )
 
 
+def _simulated_events() -> list[dict]:
+    """Blocks a dry run has recorded so far, shaped like Calendar events, so the
+    next block doesn't take the same slot."""
+    return [{
+        "summary": w["title"], "status": "confirmed",
+        "start": {"dateTime": w["start"]}, "end": {"dateTime": w["end"]},
+        "extendedProperties": {"private": {"gmailMessageId": w["message_id"]}},
+    } for w in run_context.simulated("create_event")]
+
+
+def _overlapping(events: list[dict], start: datetime, end: datetime) -> list[dict]:
+    return [e for e in events if datetime.fromisoformat(e["start"]["dateTime"]) < end
+            and datetime.fromisoformat(e["end"]["dateTime"]) > start]
+
+
 def _busy(start: datetime, end: datetime) -> list[Slot]:
     response = _service().freebusy().query(body={
         "timeMin": start.isoformat(),
@@ -43,8 +58,8 @@ def _busy(start: datetime, end: datetime) -> list[Slot]:
     }).execute()
     periods = response["calendars"]["primary"]["busy"]
     return sorted(
-        (datetime.fromisoformat(p["start"]), datetime.fromisoformat(p["end"]))
-        for p in periods
+        [(datetime.fromisoformat(p["start"]), datetime.fromisoformat(p["end"])) for p in periods]
+        + [event_slot(e) for e in _overlapping(_simulated_events(), start, end)]
     )
 
 
@@ -81,10 +96,11 @@ def _blocks_time(event: dict) -> bool:
 
 def _events(start: datetime, end: datetime) -> list[dict]:
     """Events in the range, all-day ones included."""
-    return _service().events().list(
+    events = _service().events().list(
         calendarId="primary", timeMin=start.isoformat(), timeMax=end.isoformat(),
         singleEvents=True, orderBy="startTime", maxResults=2500,
     ).execute()["items"]
+    return events + _overlapping(_simulated_events(), start, end)
 
 
 def _any_slot(event: dict) -> Slot:
@@ -208,9 +224,14 @@ def reply_slot(minutes: int, days: int = 5, urgent: bool = False) -> tuple[Slot,
     return _pick_slot(slots, [] if urgent else email_time, minutes)
 
 
-def find_event_for_message(message_id: str) -> dict | None:
+def find_event_for_message(message_id: str, real: bool = True) -> dict | None:
     """The event created for this Gmail message, past or future, including
-    ones the user deleted (status "cancelled")."""
+    ones the user deleted (status "cancelled"). A dry run's own block counts too;
+    real=False looks only at those (evals that treat old emails as new)."""
+    mine = [e for e in _simulated_events()
+            if e["extendedProperties"]["private"]["gmailMessageId"] == message_id]
+    if mine or not real:
+        return mine[0] if mine else None
     events = _service().events().list(
         calendarId="primary", privateExtendedProperty=f"gmailMessageId={message_id}",
         showDeleted=True, maxResults=1,
@@ -227,6 +248,11 @@ def create_event(title: str, slot: Slot, description: str, message_id: str, sour
     """Create an event in the primary calendar, tagged with the Gmail message
     it is for, and return its link."""
     start, end = slot
+    if run_context.skip_write(
+        "create_event", message_id=message_id, title=title,
+        start=start.isoformat(), end=end.isoformat(), description=description,
+    ):
+        return "(dry run: no event created)"
     event = _service().events().insert(calendarId="primary", body={
         "summary": title,
         "description": description,

@@ -11,7 +11,7 @@ An email-triage agent with a small web app around it. It reads Gmail, classifies
 | Backend | Django 6.1 (WSGI) |
 | Frontend | Server-rendered Django templates, one hand-written CSS file |
 | Database | SQLite (`app.db`, WAL mode) |
-| AI | LangChain (`langchain`, `langchain-anthropic`), `claude-sonnet-5-5`, pydantic structured output |
+| AI | LangChain (`langchain`, `langchain-anthropic`), `claude-haiku-5-5` (classifying) and `claude-sonnet-5-5` (drafts, tool loop), pydantic structured output |
 | Integrations | Gmail API, Google Calendar API, Google OAuth |
 | Background work | Custom `run_scheduler` management command |
 | Tests | Django `TestCase` + `unittest.mock` |
@@ -62,7 +62,7 @@ Versions are the ones installed in `.venv`. `requirements.txt` doesn't pin any.
 
 ## AI and agent
 
-- LangChain v1 with `langchain-anthropic` (`ChatAnthropic`), model `claude-sonnet-5-5` (set in `triage/agent.py`). The `anthropic` SDK stays as a dependency: LangChain calls it, and its error classes are what the runners catch.
+- LangChain v1 with `langchain-anthropic` (`ChatAnthropic`), `claude-haiku-5-5` for classifying (`CLASSIFY_MODEL` in `triage/pipeline.py`) and `claude-sonnet-5-5` for drafts and the tool loop (`MODEL` in `triage/agent.py`). The `anthropic` SDK stays as a dependency: LangChain calls it, and its error classes are what the runners catch.
 - **One-shot calls:** `agent.ask` wraps `with_structured_output(..., method="json_schema")`, Claude's native structured output. Classification, reply drafting and the sub-label cleanup judge all use it.
 - **Classification:** one `agent.ask` call per email. A dynamic pydantic model returns up to 3 labels with sub-labels, an urgency, the minutes needed, and whether a reply is needed.
 - **Label rules:** `triage/labels.md` describes each label to the classifier.

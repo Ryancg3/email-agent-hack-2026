@@ -2,7 +2,8 @@
 
 Each one is a plain function: the code calls it directly for the required
 minimum, and Claude can call the ones in ALL as tools for anything beyond that.
-apply_label, draft_reply and block_time change the real Gmail inbox and calendar.
+apply_label, draft_reply and block_time change the real Gmail inbox and calendar,
+except in a dry run, where gmail.py and gcal.py only record each write.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -13,6 +14,12 @@ from langchain_core.tools import tool
 from . import gcal
 from . import gmail
 from . import labels
+from . import run_context
+
+
+def _log(message: str) -> None:
+    """Print what an action did, or in a dry run what it would have done."""
+    print(f"[{'dry run' if run_context.current().dry_run else 'action'}] {message}")
 
 
 # Most of the user's labels one email can hold, sub-labels included.
@@ -72,7 +79,7 @@ def apply_label(message_id: str, label_name: str, sublabel: str | None = None) -
             gmail.set_label_color(sub_id, color)
     else:
         sub_id, new = gmail.create_label(full_name, color), " (new sub-label)"
-        print(f"[action] created sub-label {full_name}")
+        _log(f"created sub-label {full_name}")
     # The parent goes on too, so the email still shows under the parent label.
     gmail.add_labels(message_id, [parent["id"], sub_id])
     return f"labelled {parent['name']} and {full_name}{new}"
@@ -93,16 +100,18 @@ def block_time(message_id: str, title: str, minutes: int, notes: str, urgent: bo
             deadline, and what to prepare.
         urgent: True if the email needs an answer within the hour.
     """
+    as_if_new = run_context.current().as_if_new
     age = datetime.now(timezone.utc) - gmail.received_at(message_id)
-    if age > MAX_BLOCK_AGE:
+    if age > MAX_BLOCK_AGE and not as_if_new:
         print(f"[action] not blocked, email is {age.days} days old: {title}")
         return f"not blocked: the email is {age.days} days old, older than {MAX_BLOCK_AGE.days} days"
-    if existing := gcal.find_event_for_message(message_id):
+    # Treating the email as new ignores blocks from earlier live runs, not this run's own.
+    if existing := gcal.find_event_for_message(message_id, real=not as_if_new):
         if existing["status"] == "cancelled":
             return "not blocked: the user deleted the earlier block for this email"
         return f"already blocked {gcal.format_slot(gcal.event_slot(existing))}"
     if not (picked := gcal.reply_slot(minutes, urgent=urgent)):
-        print(f"[action] not blocked, no free slot in the next days: {title}")
+        _log(f"not blocked, no free slot in the next days: {title}")
         return "error: no free slot in the next days"
     slot, anchor = picked
     url = gmail.message_url(message_id)
@@ -110,7 +119,7 @@ def block_time(message_id: str, title: str, minutes: int, notes: str, urgent: bo
     where = f"blocked {gcal.format_slot(slot)}"
     if anchor:
         where += f" (next to existing email time {gcal.format_slot(anchor)})"
-    print(f"[action] {where} in calendar: {title} ({link})")
+    _log(f"{where} in calendar: {title} ({link})")
     return where
 
 
@@ -152,7 +161,7 @@ def draft_reply(message_id: str, body: str, reply_all: bool = False, reply_all_r
                 "Delete this line before sending.]\n\n" + body)
 
     gmail.create_reply_draft(original, to, cc, body)
-    print(f"[action] draft reply to {to}" + (f", cc {', '.join(cc)}" if cc else "") + f":\n{body}")
+    _log(f"draft reply to {to}" + (f", cc {', '.join(cc)}" if cc else "") + f":\n{body}")
     if blocked:
         return f"draft saved to sender only (reply all blocked: {blocked})"
     return "draft saved, reply all" if cc else "draft saved"

@@ -14,6 +14,8 @@ MAX_BODY_CHARS = 8000
 # backs off exponentially with jitter; 8 retries wait about 4 minutes in total, enough
 # to get past Gmail's per-minute quota window.
 RETRIES = 8
+# Id prefix of labels a dry run pretends to create.
+DRY_RUN_ID = "dry-run:"
 
 # Show the client's "Sleeping N seconds before retry" warnings, which it hides by default.
 _retry_handler = logging.StreamHandler()
@@ -41,10 +43,19 @@ def message_url(message_id: str) -> str:
 def list_labels() -> list[dict]:
     """User-created labels only (no INBOX, SPAM, CATEGORY_*, ...)."""
     labels = _service().users().labels().list(userId="me").execute(num_retries=RETRIES)["labels"]
-    return [label for label in labels if label["type"] == "user"]
+    # A dry run's own new sub-labels, so the next email reuses them as it would live.
+    made = [{"id": DRY_RUN_ID + w["name"], "name": w["name"], "type": "user"} for w in run_context.simulated("create_label")]
+    return [label for label in labels if label["type"] == "user"] + made
 
 
 def add_labels(message_id: str, label_ids: list[str]) -> None:
+    if run_context.current().dry_run:
+        names = {label["id"]: label["name"] for label in list_labels()}
+        run_context.skip_write(
+            "add_labels", message_id=message_id, label_ids=label_ids,
+            labels=[names.get(i, i.removeprefix(DRY_RUN_ID)) for i in label_ids],
+        )
+        return
     _service().users().messages().modify(
         userId="me", id=message_id, body={"addLabelIds": label_ids}
     ).execute(num_retries=RETRIES)
@@ -54,18 +65,23 @@ def get_label_ids(message_id: str) -> list[str]:
     msg = _service().users().messages().get(
         userId="me", id=message_id, format="minimal"
     ).execute(num_retries=RETRIES)
-    return msg.get("labelIds", [])
+    added = [i for w in run_context.simulated("add_labels") if w["message_id"] == message_id for i in w["label_ids"]]
+    return msg.get("labelIds", []) + added
 
 
 def create_label(name: str, color: dict | None = None) -> str:
     """Create a user label and return its id. "Parent/Child" nests it under Parent.
     color is {"textColor", "backgroundColor"}, as list_labels returns it."""
+    if run_context.skip_write("create_label", name=name):
+        return DRY_RUN_ID + name
     body = {"name": name} | ({"color": color} if color else {})
     label = _service().users().labels().create(userId="me", body=body).execute(num_retries=RETRIES)
     return label["id"]
 
 
 def set_label_color(label_id: str, color: dict) -> None:
+    if run_context.skip_write("set_label_color", label_id=label_id, color=color):
+        return
     _service().users().labels().patch(userId="me", id=label_id, body={"color": color}).execute(num_retries=RETRIES)
 
 
@@ -76,6 +92,8 @@ def get_label(label_id: str) -> dict:
 
 def delete_label(label_id: str) -> None:
     """Delete a label. Its messages stay, just without this label."""
+    if run_context.skip_write("delete_label", label_id=label_id):
+        return
     _service().users().labels().delete(userId="me", id=label_id).execute(num_retries=RETRIES)
 
 
@@ -120,6 +138,19 @@ def list_inbox_ids(limit: int, after: datetime | None = None) -> list[str]:
     return [ref["id"] for ref in refs.get("messages", [])]
 
 
+def search_ids(query: str, page_size: int = 100):
+    """Ids of the messages matching a Gmail search, newest first, fetched a page at a time."""
+    page = {}
+    while True:
+        refs = _service().users().messages().list(
+            userId="me", q=query, maxResults=page_size, **page
+        ).execute(num_retries=RETRIES)
+        yield from (ref["id"] for ref in refs.get("messages", []))
+        if "nextPageToken" not in refs:
+            return
+        page = {"pageToken": refs["nextPageToken"]}
+
+
 def watch_inbox(topic: str) -> dict:
     """Ask Gmail to post to a Pub/Sub topic when the inbox changes. Lasts 7 days;
     call again to renew. Returns {historyId, expiration (ms since epoch)}."""
@@ -145,6 +176,8 @@ def list_newest(n: int) -> list[dict]:
 
 
 def thread_has_draft(thread_id: str) -> bool:
+    if any(w["thread_id"] == thread_id for w in run_context.simulated("create_reply_draft")):
+        return True
     drafts = _service().users().drafts().list(userId="me", maxResults=500).execute(num_retries=RETRIES)
     return any(d["message"]["threadId"] == thread_id for d in drafts.get("drafts", []))
 
@@ -173,6 +206,11 @@ def create_reply_draft(original: dict, to: str, cc: list[str], body: str) -> str
         reply["In-Reply-To"] = message_id_header
         reply["References"] = " ".join(filter(None, [original.get("references"), message_id_header]))
     reply.set_content(body)
+    if run_context.skip_write(
+        "create_reply_draft", thread_id=original["thread_id"],
+        subject=reply["Subject"], to=to, cc=cc, body=body,
+    ):
+        return DRY_RUN_ID + "draft"
 
     raw = base64.urlsafe_b64encode(reply.as_bytes()).decode()
     draft = _service().users().drafts().create(
@@ -184,6 +222,8 @@ def create_reply_draft(original: dict, to: str, cc: list[str], body: str) -> str
 def insert_into_inbox(subject: str, body: str) -> str:
     """Put an email from the account to itself straight into its inbox, unread.
     Nothing is sent: it never leaves the mailbox. Returns the message id."""
+    if run_context.skip_write("insert_into_inbox", subject=subject, body=body):
+        return DRY_RUN_ID + "message"
     note = EmailMessage()
     address = my_address()
     note["From"] = formataddr(("Inbox Agent", address))

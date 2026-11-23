@@ -27,7 +27,8 @@ as drafts, never sent.
    emails after hours" in Settings, which lets `instant` blocks go in the evening and at weekends.
 4. **Draft reply** (Claude). Runs only when a reply is needed. Follows
    [triage/skills/write-reply/SKILL.md](triage/skills/write-reply/SKILL.md) and saves a Gmail draft.
-5. **Extra actions** (Claude). A tool loop of at most 5 steps that can call the
+5. **Extra actions** (Claude). Only for emails that need a reply or calendar time; newsletters,
+   receipts and alerts skip it. A tool loop of at most 5 steps that can call the
    tools in [triage/actions.py](triage/actions.py) for anything beyond the required minimum.
 
 See [docs/system-design.md](docs/system-design.md) for the infrastructure, its
@@ -61,10 +62,35 @@ the Google OAuth client values.
 ```bash
 make dev        # web app on http://localhost:8000, plus the scheduler
 make agent N=3  # CLI: process the newest 3 emails (needs credentials.json)
+make agent N=50 DRY_RUN=1  # eval mode: changes nothing, saves the would-be actions to eval_runs/
 make test       # run the tests
 ```
 
 Run `make help` to see every command.
+
+### Evals
+
+Four commands. Your emails, answers and results stay in `eval_data/` and
+`eval_runs/`, both gitignored.
+
+**1. Build the dataset.** Every email is reviewed by you before it counts.
+
+```bash
+make eval-export N=50   # pull 50 new emails, pre-fill with the agent's decisions, open the review page
+make eval-review        # reopen the review page later (http://127.0.0.1:8765)
+```
+
+**2. Benchmark and compare.** A benchmark runs the whole live system (classify,
+labels, calendar, draft, agent loop) on every reviewed email in dry run, so
+Gmail and Calendar never change. It reports accuracy, cost per email, per month
+and emails per $1, and asks before spending.
+
+```bash
+make bench NAME=current                  # the system as the code is now
+make bench NAME=all-sonnet CLASSIFY=sonnet   # the same system with another model for a step
+make bench NAME=no-loop AGENT=none       # partial: skip the agent loop
+make bench-review                        # page: compare two saved runs, flag the prod one
+```
 
 ## Hosting
 
