@@ -18,12 +18,15 @@ def top_labels(text: str) -> set[str]:
 
 def weights(rows: list[dict]) -> dict[str, float]:
     """How many real emails each row stands for: its sender's emails in the scanned
-    period, shared among that sender's rows. 1 when the count is missing."""
+    period, shared equally among that sender's rows. Exports add rows over time, each
+    with the count of its own scan; one count per sender (the highest) keeps a later
+    row from changing the sender's share. 1 when the count is missing."""
     rows_per_sender = Counter(address(row["sender"]) for row in rows)
-    return {
-        row["id"]: float(row.get("sender_emails") or 1) / rows_per_sender[address(row["sender"])]
-        for row in rows
-    }
+    per_sender: dict[str, float] = {}
+    for row in rows:
+        sender = address(row["sender"])
+        per_sender[sender] = max(per_sender.get(sender, 1.0), float(row.get("sender_emails") or 1))
+    return {row["id"]: per_sender[address(row["sender"])] / rows_per_sender[address(row["sender"])] for row in rows}
 
 
 def grade(row: dict, guess: dict | None) -> dict:

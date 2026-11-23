@@ -165,21 +165,25 @@ def prefill_estimate(count: int) -> str:
     return f"about ${count * dollars(pipeline.CLASSIFY_MODEL, 4000, 250):.2f} with {pipeline.CLASSIFY_MODEL}"
 
 
-def append(emails: list[dict], guesses: dict[str, dict], dataset: list[dict]) -> None:
-    """Add the new emails to emails.jsonl and, as to-do rows, to answers.csv."""
+def append(emails: list[dict], guesses: dict[str, dict]) -> None:
+    """Add the new emails to emails.jsonl and, as to-do rows, to answers.csv. The
+    answers are read again under the lock, so reviews saved meanwhile are kept."""
     from . import review
 
     DATA_DIR.mkdir(exist_ok=True)
-    with EMAILS_FILE.open("a") as f:
-        for email in emails:
-            agent_view = {k: v for k, v in email.items() if k not in ("sender_emails", "account")}
-            f.write(json.dumps(agent_view, ensure_ascii=False) + "\n")
-    rows = dataset + [{
-        "id": e["id"], "account": e["account"], "date": e["date"][:10], "sender": e["sender"],
-        "subject": e["subject"], "checked": "", "sender_emails": e["sender_emails"], "notes": "",
-        **(guesses.get(e["id"]) or {"labels": "", "urgency": "", "needs_reply": ""}),
-    } for e in emails]
-    review.write_rows(rows)
+    with review.answers_locked():
+        current = review.read_rows() if ANSWERS_FILE.exists() else []
+        have = {row["id"] for row in current}
+        new = [e for e in emails if e["id"] not in have]
+        with EMAILS_FILE.open("a") as f:
+            for email in new:
+                agent_view = {k: v for k, v in email.items() if k not in ("sender_emails", "account")}
+                f.write(json.dumps(agent_view, ensure_ascii=False) + "\n")
+        review.write_rows(current + [{
+            "id": e["id"], "account": e["account"], "date": e["date"][:10], "sender": e["sender"],
+            "subject": e["subject"], "checked": "", "sender_emails": e["sender_emails"], "notes": "",
+            **(guesses.get(e["id"]) or {"labels": "", "urgency": "", "needs_reply": ""}),
+        } for e in new])
 
 
 def main() -> None:
@@ -201,7 +205,7 @@ def main() -> None:
 
     question = f"Pre-fill {len(emails)} emails with the agent's decisions, {prefill_estimate(len(emails))}? [y/N] "
     guesses = prefill(emails, names) if args.yes or input(question).strip().lower().startswith("y") else {}
-    append(emails, guesses, dataset)
+    append(emails, guesses)
     print(f"\nAdded {len(emails)} emails ({len(guesses)} pre-filled) from {len(seen)} senders. "
           f"They stay out of the benchmark until you mark them done.")
     review.serve(to_do=True)

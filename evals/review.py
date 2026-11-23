@@ -12,8 +12,10 @@ the set grows, and keeps any extra columns added by hand.
 import argparse
 import csv
 import json
+import fcntl
 import threading
 import webbrowser
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -27,6 +29,19 @@ PAGE = Path(__file__).parent / "review.html"
 URGENCIES = ["not_urgent", "schedule_time", "instant"]
 REPLIES = ["yes", "no"]
 _lock = threading.Lock()
+
+
+@contextmanager
+def answers_locked():
+    """Hold answers.csv for a read-modify-write, across processes: the review page
+    and make eval-export can run at the same time without losing each other's rows."""
+    ANSWERS_FILE.parent.mkdir(exist_ok=True)
+    with _lock, open(ANSWERS_FILE.parent / ".answers.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def read_rows() -> list[dict]:
@@ -63,7 +78,7 @@ def label_options(rows: list[dict]) -> dict:
 def save(answer: dict) -> dict:
     """Store one answer. labels is a list of top-level labels like ["Work", "Team"]; done
     (default true) marks the row checked, false marks it to do again."""
-    with _lock:
+    with answers_locked():
         rows = read_rows()
         row = next((r for r in rows if r["id"] == answer.get("id")), None)
         if row is None:

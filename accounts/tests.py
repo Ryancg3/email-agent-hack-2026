@@ -1221,13 +1221,18 @@ class EvalExportTests(SimpleTestCase):
                      "LABELS_FILE": Path(tmp) / "labels.json"}
             with mock.patch.multiple(eval_export, **files), mock.patch.multiple(eval_review, ANSWERS_FILE=files["ANSWERS_FILE"]):
                 old = [{"id": "old", "account": "me", "date": "d", "sender": "s", "subject": "s", "labels": "Work",
-                        "urgency": "not_urgent", "needs_reply": "no", "checked": "yes", "sender_emails": "1", "notes": ""}]
+                        "urgency": "not_urgent", "needs_reply": "no", "checked": "", "sender_emails": "1", "notes": ""}]
+                eval_review.write_rows(old)
+                # Reviewed on the page while the export was pulling and pre-filling:
+                eval_review.write_rows([{**old[0], "checked": "yes"}])
                 new = [{"id": "m1", "thread_id": "t", "sender": "s", "to": "", "cc": "", "subject": "s", "body": "b",
                         "date": "2026-11-20T00:00:00", "account": "me", "sender_emails": 2}]
-                eval_export.append(new, {"m1": {"labels": "Team", "urgency": "instant", "needs_reply": "yes"}}, old)
+                eval_export.append(new, {"m1": {"labels": "Team", "urgency": "instant", "needs_reply": "yes"}})
+                eval_export.append(new, {})  # the same email twice is added once
                 rows = eval_review.read_rows()
                 saved = files["EMAILS_FILE"].read_text().splitlines()
-        self.assertEqual([(r["id"], r["checked"]) for r in rows], [("old", "yes"), ("m1", "")])
+        self.assertEqual([(r["id"], r["checked"]) for r in rows], [("old", "yes"), ("m1", "")])  # the review survived
+        self.assertEqual(len(saved), 1)
         self.assertEqual((rows[1]["labels"], rows[1]["urgency"]), ("Team", "instant"))
         self.assertEqual(set(json.loads(saved[0])), {"id", "thread_id", "sender", "to", "cc", "subject", "body", "date"})
 
@@ -1315,6 +1320,10 @@ class ScoringTests(SimpleTestCase):
     def test_weights_share_a_senders_emails_among_its_rows(self):
         self.assertEqual(eval_scoring.weights(self.ROWS), {"a": 15.0, "b": 15.0, "c": 1.0})
 
+    def test_a_later_export_doesnt_change_a_senders_share(self):
+        rows = [{"id": "a", "sender": "x@x.com", "sender_emails": "100"}, {"id": "b", "sender": "x@x.com", "sender_emails": "1"}]
+        self.assertEqual(eval_scoring.weights(rows), {"a": 50.0, "b": 50.0})  # still 100 emails in total
+
     def test_grade_scores_labels_without_their_sub_labels(self):
         guess = {"labels": "Jobs/Google", "urgency": "not_urgent", "needs_reply": "no"}
         self.assertTrue(eval_scoring.grade(self.ROWS[0], guess)["all"])
@@ -1373,6 +1382,13 @@ class VolumeTests(SimpleTestCase):
         query = search.call_args.args[0]
         self.assertIn(f"after:{int(start.timestamp())}", query)
         self.assertIn("-from:me", query)
+
+    def test_a_failed_count_is_unknown_not_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.multiple(eval_volume, RUNS_DIR=Path(tmp), VOLUME_FILE=Path(tmp) / "volume.json"), \
+                mock.patch.object(eval_volume, "count_months", side_effect=RuntimeError("Gmail is down")), \
+                mock.patch("builtins.print"):
+            self.assertIsNone(eval_volume.monthly_emails())
 
     def test_counted_again_only_when_missing_or_a_month_old(self):
         with tempfile.TemporaryDirectory() as tmp, \
@@ -1514,6 +1530,20 @@ class AsIfNewTests(SimpleTestCase):
 
 
 class BenchSafetyTests(SimpleTestCase):
+    def test_a_step_no_run_measured_makes_the_estimate_a_lower_bound(self):
+        no_loop = {"run": "r1", "folder": "r1-no-loop", "emails": 1, "errors": 0, "total_dollars": 0.001,
+                   "model_classify": "claude-haiku-5-5", "model_draft": "claude-sonnet-5-5", "model_agent": "none",
+                   "model_loop_runs": "never", "dollars_per_email": 0.001}
+        record = {"calls": [{"step": "classify", "input_tokens": 1000, "output_tokens": 100}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "r1-no-loop").mkdir()
+            (Path(tmp) / "r1-no-loop" / "results.jsonl").write_text(json.dumps(record))
+            with mock.patch.object(eval_bench, "BENCH_DIR", Path(tmp)), \
+                    mock.patch.object(eval_bench, "load_runs", return_value=[no_loop]):
+                text = eval_bench.estimate(eval_bench.system(), [{"needs_reply": "yes", "urgency": "instant"}])
+        self.assertTrue(text.startswith("at least $"), text)
+        self.assertIn("agent loop", text)
+
     def test_estimate_ignores_runs_that_failed(self):
         models = eval_bench.system()
         failed = {"run": "r1", "emails": 175, "errors": 175, "total_dollars": 0, "dollars_per_email": 0,

@@ -48,7 +48,11 @@ def monthly_emails(refresh: bool = True) -> int | None:
     if fresh or not refresh:
         return saved["average"] if saved else None
     print("Counting your emails per month in Gmail (free, read-only)...")
-    months = count_months()
+    try:
+        months = count_months()
+    except Exception as e:  # optional: never lose a paid benchmark over it
+        print(f"Couldn't count emails per month ({e}); monthly cost shown as unknown.")
+        return saved["average"] if saved else None
     average = round(sum(n for _, n in months) / len(months))
     RUNS_DIR.mkdir(exist_ok=True)
     VOLUME_FILE.write_text(json.dumps({"months": months, "average": average,

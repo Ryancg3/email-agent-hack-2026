@@ -124,7 +124,9 @@ function decision(r) {
   const p = r.predicted || {};
   // Sorted, so "Work; Team" and "Team; Work" are the same decision; sub-labels stay attached.
   const labels = (p.labels || "").split("; ").filter(Boolean).sort().join("; ");
-  return { labels, urgency: p.urgency, needs_reply: p.needs_reply, draft: !!r.draft, actions: actionKinds(r).join("|") };
+  // A draft counts by who it goes to (sender only or reply all), not by its wording.
+  const draft = r.draft ? [r.draft.to, ...[...(r.draft.cc || [])].sort()].join(",").toLowerCase() : "";
+  return { labels, urgency: p.urgency, needs_reply: p.needs_reply, draft, actions: actionKinds(r).join("|") };
 }
 function differsIn(a, b, field) {
   return !!(a && b) && decision(a)[field] !== decision(b)[field];

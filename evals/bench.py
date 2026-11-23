@@ -285,33 +285,38 @@ def cost_breakdown(s: dict) -> str:
 
 
 def estimate(models: dict, rows: list[dict]) -> str:
-    """A rough cost before starting: from the newest run of the same models, else
-    from the tokens per step of the newest run of any system, priced at these models."""
-    for s in reversed(load_runs()):
-        same = all(s.get(f"model_{k}") == v for k, v in models.items() if k != "emails_dated")
-        # Only runs that mostly worked: a run that failed (e.g. a bad API key) cost nothing.
-        if same and s["emails"] and s["errors"] < s["emails"] / 2 and s["total_dollars"] > 0:
-            return f"about ${s['dollars_per_email'] * len(rows):.2f} (from run {s['run']})"
+    """A rough cost before starting: from the newest run of the same system, else per
+    step from the newest run that measured that step, priced at the chosen models.
+    A needed step with no measurement makes it a lower bound, never a silent $0."""
     worked = [s for s in load_runs() if s["emails"] and s["errors"] < s["emails"] / 2 and s["total_dollars"] > 0]
-    if not worked:
-        return "unknown: no earlier run to estimate from"
-    records = [json.loads(line) for line in (BENCH_DIR / worked[-1]["folder"] / "results.jsonl").read_text().splitlines()]
+    for s in reversed(worked):
+        if all(s.get(f"model_{k}") == v for k, v in models.items() if k != "emails_dated"):
+            return f"about ${s['dollars_per_email'] * len(rows):.2f} (from run {s['run']})"
     model_of = {"classify": models["classify"], "draft reply": models["draft"], "agent loop": models["agent"]}
+    runs = [[json.loads(line) for line in (BENCH_DIR / s["folder"] / "results.jsonl").read_text().splitlines()]
+            for s in reversed(worked)]  # newest first
 
-    def step(name: str) -> float:
-        """Average cost of this step for an email that runs it, at the chosen model."""
-        ran = [[c for c in r["calls"] if c["step"] == name] for r in records]
-        ran = [calls for calls in ran if calls]
-        model = model_of[name]
-        if model == "none" or not ran:
+    def step(name: str) -> float | None:
+        """Average cost of this step for an email that runs it, at the chosen model; None if never measured."""
+        if model_of[name] == "none":
             return 0.0
-        return sum(dollars(model, c["input_tokens"], c["output_tokens"]) for calls in ran for c in calls) / len(ran)
+        for records in runs:
+            ran = [calls for calls in ([c for c in r["calls"] if c["step"] == name] for r in records) if calls]
+            if ran:
+                return sum(dollars(model_of[name], c["input_tokens"], c["output_tokens"])
+                           for calls in ran for c in calls) / len(ran)
+        return None
 
     replies = sum(r["needs_reply"] == "yes" for r in rows)
     looped = len(rows) if models["loop_runs"] == "every email" else sum(
         r["needs_reply"] == "yes" or r["urgency"] != "not_urgent" for r in rows)
-    total = len(rows) * step("classify") + looped * step("agent loop") + replies * step("draft reply")
-    return f"about ${total:.2f} (rough, from the tokens of run {worked[-1]['run']})"
+    counts = {"classify": len(rows), "draft reply": replies, "agent loop": looped}
+    costs = {name: step(name) for name in counts}
+    missing = [name for name, cost in costs.items() if cost is None and counts[name]]
+    total = sum(counts[name] * (cost or 0) for name, cost in costs.items())
+    if missing:
+        return f"at least ${total:.2f} (no earlier run measured: {', '.join(missing)})"
+    return f"about ${total:.2f} (rough, from earlier runs' tokens)"
 
 
 def main() -> None:
