@@ -918,7 +918,7 @@ class BlockTimeAgeTests(SimpleTestCase):
         with mock.patch.object(actions.gmail, "received_at", return_value=received), \
                 mock.patch.object(actions.gcal, "find_event_for_message", return_value=None), \
                 mock.patch.object(actions.gcal, "reply_slot", return_value=None) as reply_slot, \
-                mock.patch("builtins.print"):
+                run_context.use(run_context.RunContext(None)), mock.patch("builtins.print"):
             outcome = actions.block_time("m1", "Reply to Bob", 15, "notes", urgent=True)
         return outcome, reply_slot
 
